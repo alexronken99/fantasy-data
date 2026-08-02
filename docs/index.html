@@ -172,4 +172,463 @@
 
 <nav class="view-tabs" id="viewTabs">
   <button data-view="jugadores" class="active">Jugadores</button>
-  <button data-view="mercado">Mercado</but
+  <button data-view="mercado">Mercado</button>
+  <button data-view="equipos">Equipos</button>
+</nav>
+
+<div class="layout" id="viewJugadores">
+  <nav class="rail" id="rail"></nav>
+
+  <div class="main">
+    <div class="toolbar">
+      <input type="text" id="search" placeholder="Buscar jugador o equipo…" />
+      <select id="sortSel">
+        <option value="value_desc">Valor ↓</option>
+        <option value="value_asc">Valor ↑</option>
+        <option value="trend_desc">Sube más</option>
+        <option value="trend_asc">Baja más</option>
+        <option value="points_desc">Puntos ↓</option>
+        <option value="avg_desc">Media ↓</option>
+      </select>
+      <span class="count" id="rowCount"></span>
+    </div>
+    <div id="tableWrap"><div class="loading">Cargando jugadores desde la API…</div></div>
+  </div>
+</div>
+
+<div class="view-full" id="viewMercado" style="display:none;">
+  <div class="sub" style="margin-bottom:10px; color:var(--chalk-dim); font-size:13px;">Jugadores fichados (tuyos o de tus rivales) — valor, cláusula pagada y cuándo se liberan.</div>
+  <div id="mercadoWrap"><div class="empty-radar">Aún no sigues ninguna cláusula. Pulsa "Marcar" en un jugador de la pestaña Jugadores.</div></div>
+</div>
+
+<div class="view-full" id="viewEquipos" style="display:none;">
+  <div class="sub" style="margin-bottom:10px; color:var(--chalk-dim); font-size:13px;">Valor y tendencia de la plantilla de cada manager de tu liga (tú y tus rivales), según lo que marques en Mercado.</div>
+  <div id="equiposWrap"></div>
+</div>
+
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <h3 id="mpName">Jugador</h3>
+    <p class="mp-team" id="mpTeam"></p>
+    <label>Manager (rival o tú mismo)</label>
+    <input type="text" id="mpRival" placeholder="p. ej. Carlos, o tu propio nombre" />
+    <label>Fecha de la operación</label>
+    <input type="date" id="mpDate" />
+    <label>Cláusula pagada (opcional, €)</label>
+    <input type="text" id="mpClause" placeholder="p. ej. 4200000" />
+    <div class="modal-actions">
+      <button class="btn-secondary" id="mpCancel">Cancelar</button>
+      <button class="btn-primary" id="mpSave">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const TEAMS = {2:"ATM",3:"ATH",4:"BAR",5:"BET",6:"CEL",7:"ELC",8:"ESP",9:"GET",11:"LEV",13:"OSA",14:"RAY",15:"RMA",16:"RSO",17:"SEV",18:"VAL",20:"VIL",21:"ALA",28:"GIR",33:"MLL",157:"OVI"};
+const POSITIONS = {1:"Portero",2:"Defensa",3:"Medio",4:"Delantero",5:"Entrenador"};
+const POS_ORDER = [1,2,3,4,5];
+const STATUS_LABEL = {injured:"Lesionado", doubtful:"Duda", suspended:"Sancionado", out_of_league:"Fuera de liga"};
+
+let players = [];
+let prevSnapshot = {};
+let currentPos = "all";
+let sortMode = "value_desc";
+let searchTerm = "";
+let radarEntries = [];
+let currentView = "jugadores";
+
+function fmtEuro(n){
+  if(n==null) return "—";
+  return "€" + Number(n).toLocaleString("es-ES");
+}
+
+const DATA_REPO_BASE = "https://raw.githubusercontent.com/alexronken99/fantasy-data/main";
+
+async function loadStorage(){
+  try{
+    radarEntries = JSON.parse(localStorage.getItem("radar_entries") || "[]");
+  }catch(e){ radarEntries = []; }
+}
+
+async function saveRadar(){
+  try{ localStorage.setItem("radar_entries", JSON.stringify(radarEntries)); }catch(e){}
+}
+
+function checkClauseAlerts(){
+  if(!("Notification" in window)) return;
+  const today = new Date();
+  const todayKey = today.toISOString().slice(0,10);
+  let notified = {};
+  try{ notified = JSON.parse(localStorage.getItem("notified_map") || "{}"); }catch(e){ notified = {}; }
+
+  const due = radarEntries.filter(e => {
+    const compra = new Date(e.fecha);
+    const liberaEn = new Date(compra); liberaEn.setDate(liberaEn.getDate() + 14);
+    const diasRestantes = Math.ceil((liberaEn - today) / 86400000);
+    return diasRestantes <= 1 && notified[e.key] !== todayKey;
+  });
+  if(due.length === 0) return;
+
+  const fire = () => {
+    due.forEach(e => {
+      new Notification("Cláusula a punto de liberarse", {
+        body: `${e.nombre} (fichado por ${e.rival}) se libera en 1 día o menos.`,
+        icon: "https://assets-fantasy.llt-services.com/players/no-player/no-player-sq_256.png"
+      });
+      notified[e.key] = todayKey;
+    });
+    try{ localStorage.setItem("notified_map", JSON.stringify(notified)); }catch(e){}
+  };
+
+  if(Notification.permission === "granted"){
+    fire();
+  } else if(Notification.permission !== "denied"){
+    Notification.requestPermission().then(perm => { if(perm === "granted") fire(); });
+  }
+}
+
+async function loadPrevSnapshot(){
+  try{
+    prevSnapshot = await fetchJsonWithFallback(`${DATA_REPO_BASE}/previous.json`);
+  }catch(e){
+    try{
+      prevSnapshot = await fetchJsonWithFallback(`${DATA_REPO_BASE}/latest.json`);
+    }catch(e2){
+      prevSnapshot = {date:null, values:{}};
+    }
+  }
+}
+
+function trendFor(p){
+  const entry = prevSnapshot.values ? prevSnapshot.values[p.id] : null;
+  const prevVal = entry && typeof entry === "object" ? entry.value : entry;
+  if(prevVal == null) return {diff:0, dir:"flat"};
+  const diff = p.marketValue - prevVal;
+  return {diff, dir: diff > 0 ? "up" : diff < 0 ? "down" : "flat"};
+}
+
+async function fetchJsonWithFallback(targetUrl){
+  const attempts = [
+    targetUrl,
+    "https://api.allorigins.win/raw?url=" + encodeURIComponent(targetUrl),
+    "https://corsproxy.io/?url=" + encodeURIComponent(targetUrl),
+    "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(targetUrl)
+  ];
+  let lastErr;
+  for(const url of attempts){
+    try{
+      const res = await fetch(url, {cache:"no-store"});
+      if(!res.ok) throw new Error("HTTP " + res.status);
+      const text = await res.text();
+      return JSON.parse(text);
+    }catch(e){ lastErr = e; }
+  }
+  throw lastErr || new Error("No se pudo conectar por ninguna vía");
+}
+
+function normalizeName(name){
+  if(!name) return "";
+  return name
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+const POSITION_NAME_TO_ID = {"Portero":1,"Defensa":2,"Medio":3,"Delantero":4,"Entrenador":5};
+
+async function fetchPlayers(){
+  const latest = await fetchJsonWithFallback(`${DATA_REPO_BASE}/latest.json`);
+  const values = latest.values || {};
+
+  players = Object.keys(values).map(key => {
+    const v = values[key];
+    const entry = (v && typeof v === "object") ? v : {value: v};
+    return {
+      id: key,
+      nickname: entry.name || key,
+      positionId: POSITION_NAME_TO_ID[entry.position] || 0,
+      teamAbbr: entry.team || "—",
+      marketValue: Number(entry.value),
+      points: null,
+      averagePoints: null,
+      playerStatus: null
+    };
+  });
+}
+
+function buildRail(){
+  const rail = document.getElementById("rail");
+  rail.innerHTML = "";
+  const allBtn = document.createElement("button");
+  allBtn.textContent = "Todos";
+  allBtn.className = currentPos === "all" ? "active" : "";
+  allBtn.onclick = () => { currentPos = "all"; render(); };
+  rail.appendChild(allBtn);
+  POS_ORDER.forEach(pid => {
+    const b = document.createElement("button");
+    b.textContent = POSITIONS[pid];
+    b.className = currentPos === pid ? "active" : "";
+    b.onclick = () => { currentPos = pid; render(); };
+    rail.appendChild(b);
+  });
+}
+
+function sortPlayers(list){
+  const withTrend = list.map(p => ({p, t: trendFor(p)}));
+  switch(sortMode){
+    case "value_desc": withTrend.sort((a,b)=>b.p.marketValue-a.p.marketValue); break;
+    case "value_asc": withTrend.sort((a,b)=>a.p.marketValue-b.p.marketValue); break;
+    case "trend_desc": withTrend.sort((a,b)=>b.t.diff-a.t.diff); break;
+    case "trend_asc": withTrend.sort((a,b)=>a.t.diff-b.t.diff); break;
+    case "points_desc": withTrend.sort((a,b)=>(b.p.points||0)-(a.p.points||0)); break;
+    case "avg_desc": withTrend.sort((a,b)=>(b.p.averagePoints||0)-(a.p.averagePoints||0)); break;
+  }
+  return withTrend.map(x=>x.p);
+}
+
+function renderTable(){
+  let list = players.filter(p => currentPos === "all" || p.positionId === currentPos);
+  if(searchTerm){
+    const s = searchTerm.toLowerCase();
+    list = list.filter(p => p.nickname.toLowerCase().includes(s) || (p.teamAbbr||"").toLowerCase().includes(s));
+  }
+  list = sortPlayers(list);
+  document.getElementById("rowCount").textContent = list.length + " jugadores";
+
+  let html = "<table><thead><tr><th>Jugador</th><th>Valor</th><th>Tendencia</th><th>Puntos</th><th>Media</th><th></th></tr></thead><tbody>";
+  list.slice(0, 300).forEach(p => {
+    const t = trendFor(p);
+    const arrow = t.dir === "up" ? "▲" : t.dir === "down" ? "▼" : "＝";
+    const statusFlag = STATUS_LABEL[p.playerStatus] ? `<span class="status-flag status-${p.playerStatus}">${STATUS_LABEL[p.playerStatus]}</span>` : "";
+    html += `<tr>
+      <td><span class="pname">${p.nickname}</span><span class="pteam">${p.teamAbbr}</span>${statusFlag}</td>
+      <td class="pval">${fmtEuro(p.marketValue)}</td>
+      <td class="trend ${t.dir}">${arrow} ${t.diff !== 0 ? fmtEuro(Math.abs(t.diff)) : "sin datos previos"}</td>
+      <td class="ppts">${p.points ?? "—"}</td>
+      <td class="ppts">${p.averagePoints ? p.averagePoints.toFixed(2) : "—"}</td>
+      <td><button class="track-btn" data-id="${p.id}">Marcar</button></td>
+    </tr>`;
+  });
+  html += "</tbody></table>";
+  document.getElementById("tableWrap").innerHTML = html;
+
+  document.querySelectorAll(".track-btn").forEach(btn => {
+    btn.onclick = () => openModal(btn.dataset.id);
+  });
+}
+
+function ringSVG(pct, color){
+  const r = 24, c = 2*Math.PI*r;
+  const offset = c * (1-pct);
+  return `<svg width="56" height="56"><circle cx="28" cy="28" r="${r}" stroke="rgba(233,236,229,0.12)" stroke-width="5" fill="none"/>
+  <circle cx="28" cy="28" r="${r}" stroke="${color}" stroke-width="5" fill="none" stroke-dasharray="${c}" stroke-dashoffset="${offset}" stroke-linecap="round"/></svg>`;
+}
+
+function renderMercadoView(){
+  const box = document.getElementById("mercadoWrap");
+  if(radarEntries.length === 0){
+    box.innerHTML = `<div class="empty-radar">Aún no sigues ninguna cláusula. Pulsa "Marcar" en un jugador de la pestaña Jugadores.</div>`;
+    return;
+  }
+  const today = new Date();
+  let html = `<table><thead><tr>
+    <th>Jugador</th><th>Equipo</th><th>Manager</th><th>Valor actual</th><th>Tendencia</th>
+    <th>Cláusula pagada</th><th>Diferencia</th><th>Libera en</th><th></th>
+  </tr></thead><tbody>`;
+
+  radarEntries.slice().sort((a,b)=> new Date(a.fecha) - new Date(b.fecha)).forEach(e => {
+    const player = players.find(p => String(p.id) === String(e.playerId));
+    const compra = new Date(e.fecha);
+    const liberaEn = new Date(compra); liberaEn.setDate(liberaEn.getDate() + 14);
+    const diasRestantes = Math.ceil((liberaEn - today) / 86400000);
+    const rowClass = diasRestantes <= 0 ? "" : diasRestantes <= 3 ? "mkt-soon" : "";
+    const liberaLabel = diasRestantes <= 0 ? "Ya libre" : diasRestantes + " días";
+    const valorActual = player ? player.marketValue : null;
+    const t = player ? trendFor(player) : {diff:0, dir:"flat"};
+    const arrow = t.dir === "up" ? "▲" : t.dir === "down" ? "▼" : "＝";
+    const diff = (valorActual != null && e.clausula) ? valorActual - e.clausula : null;
+    const diffClass = diff == null ? "" : diff >= 0 ? "diff-pos" : "diff-neg";
+    const diffLabel = diff == null ? "—" : (diff >= 0 ? "+" : "") + fmtEuro(diff);
+
+    html += `<tr class="${rowClass}">
+      <td class="pname">${player ? player.nickname : e.nombre}</td>
+      <td class="pteam">${player ? player.teamAbbr : "—"}</td>
+      <td>${e.rival}</td>
+      <td class="pval">${valorActual != null ? fmtEuro(valorActual) : "—"}</td>
+      <td class="trend ${t.dir}">${arrow} ${t.diff !== 0 ? fmtEuro(Math.abs(t.diff)) : "—"}</td>
+      <td class="pval">${e.clausula ? fmtEuro(e.clausula) : "—"}</td>
+      <td class="${diffClass}">${diffLabel}</td>
+      <td>${liberaLabel}</td>
+      <td><button class="rm-btn" data-key="${e.key}" title="Dejar de seguir">✕</button></td>
+    </tr>`;
+  });
+  html += "</tbody></table>";
+  box.innerHTML = html;
+  document.querySelectorAll("#mercadoWrap .rm-btn").forEach(btn => {
+    btn.onclick = async () => {
+      radarEntries = radarEntries.filter(e => e.key !== btn.dataset.key);
+      await saveRadar();
+      renderMercadoView();
+    };
+  });
+}
+
+function renderEquiposView(){
+  const box = document.getElementById("equiposWrap");
+  if(radarEntries.length === 0){
+    box.innerHTML = `<div class="empty-radar">Aún no hay jugadores marcados en Mercado. En cuanto añadas alguno con un rival (o tu propio nombre), aparecerá aquí agregado.</div>`;
+    return;
+  }
+  const byManager = {};
+  radarEntries.forEach(e => {
+    const player = players.find(p => String(p.id) === String(e.playerId));
+    const manager = e.rival || "Sin nombre";
+    if(!byManager[manager]) byManager[manager] = {manager, count:0, total:0, clausulaTotal:0, trendTotal:0};
+    byManager[manager].count++;
+    if(player){
+      byManager[manager].total += player.marketValue;
+      byManager[manager].trendTotal += trendFor(player).diff;
+    }
+    if(e.clausula) byManager[manager].clausulaTotal += e.clausula;
+  });
+  const rows = Object.values(byManager).sort((a,b)=> b.total - a.total);
+  let html = `<table><thead><tr>
+    <th>Manager</th><th>Jugadores</th><th>Valor total</th><th>Invertido en cláusulas</th><th>Tendencia total</th>
+  </tr></thead><tbody>`;
+  rows.forEach(r => {
+    const cls = r.trendTotal > 0 ? "up" : r.trendTotal < 0 ? "down" : "flat";
+    const arrow = r.trendTotal > 0 ? "▲" : r.trendTotal < 0 ? "▼" : "＝";
+    html += `<tr>
+      <td class="pname">${r.manager}</td>
+      <td class="ppts">${r.count}</td>
+      <td class="pval">${fmtEuro(r.total)}</td>
+      <td class="pval">${r.clausulaTotal ? fmtEuro(r.clausulaTotal) : "—"}</td>
+      <td class="trend ${cls}">${arrow} ${r.trendTotal !== 0 ? fmtEuro(Math.abs(r.trendTotal)) : "—"}</td>
+    </tr>`;
+  });
+  html += "</tbody></table>";
+  box.innerHTML = html;
+}
+
+function renderTicker(){
+  const withTrend = players.map(p => ({p, t: trendFor(p)})).filter(x => x.t.diff !== 0);
+  withTrend.sort((a,b)=> Math.abs(b.t.diff) - Math.abs(a.t.diff));
+  const top = withTrend.slice(0, 24);
+  if(top.length === 0){
+    document.getElementById("ticker").innerHTML = `<span class="tick-item name">Sin histórico todavía — vuelve mañana para ver movimientos de mercado.</span>`;
+    return;
+  }
+  document.getElementById("ticker").innerHTML = top.map(x => {
+    const cls = x.t.dir === "up" ? "tick-up" : "tick-down";
+    const arrow = x.t.dir === "up" ? "▲" : "▼";
+    return `<span class="tick-item"><span class="name">${x.p.nickname}</span><span class="${cls}">${arrow} ${fmtEuro(Math.abs(x.t.diff))}</span></span>`;
+  }).join("");
+}
+
+function render(){
+  document.getElementById("viewJugadores").style.display = currentView === "jugadores" ? "" : "none";
+  document.getElementById("viewMercado").style.display = currentView === "mercado" ? "" : "none";
+  document.getElementById("viewEquipos").style.display = currentView === "equipos" ? "" : "none";
+
+  if(currentView === "jugadores"){
+    buildRail();
+    renderTable();
+  } else if(currentView === "mercado"){
+    renderMercadoView();
+  } else if(currentView === "equipos"){
+    renderEquiposView();
+  }
+  renderTicker();
+}
+
+document.querySelectorAll("#viewTabs button").forEach(btn => {
+  btn.onclick = () => {
+    currentView = btn.dataset.view;
+    document.querySelectorAll("#viewTabs button").forEach(b => b.classList.toggle("active", b === btn));
+    render();
+  };
+});
+
+function openModal(playerId){
+  const p = players.find(pl => String(pl.id) === String(playerId));
+  document.getElementById("mpName").textContent = p.nickname;
+  document.getElementById("mpTeam").textContent = p.teamAbbr + " · " + POSITIONS[p.positionId] + " · valor actual " + fmtEuro(p.marketValue);
+  document.getElementById("mpRival").value = "";
+  document.getElementById("mpDate").value = new Date().toISOString().slice(0,10);
+  document.getElementById("mpClause").value = "";
+  document.getElementById("overlay").classList.add("show");
+  document.getElementById("mpSave").onclick = async () => {
+    const rival = document.getElementById("mpRival").value.trim();
+    const fecha = document.getElementById("mpDate").value;
+    const clausula = document.getElementById("mpClause").value.trim();
+    if(!rival || !fecha) return;
+    radarEntries.push({
+      key: p.id + "_" + Date.now(),
+      playerId: p.id,
+      nombre: p.nickname,
+      rival,
+      fecha,
+      clausula: clausula ? Number(clausula) : null
+    });
+    await saveRadar();
+    document.getElementById("overlay").classList.remove("show");
+    render();
+  };
+}
+document.getElementById("mpCancel").onclick = () => document.getElementById("overlay").classList.remove("show");
+document.getElementById("overlay").onclick = (e) => { if(e.target.id === "overlay") e.currentTarget.classList.remove("show"); };
+
+document.getElementById("search").addEventListener("input", (e) => { searchTerm = e.target.value; renderTable(); });
+document.getElementById("sortSel").addEventListener("change", (e) => { sortMode = e.target.value; renderTable(); });
+
+async function init(){
+  await loadStorage();
+  checkClauseAlerts();
+  try{
+    await fetchPlayers();
+    await loadPrevSnapshot();
+    const snapDate = prevSnapshot.date ? `· histórico desde ${prevSnapshot.date}` : "· sin histórico previo todavía";
+    document.getElementById("statusBox").innerHTML = `<b>${players.length}</b> jugadores · actualizado ${new Date().toLocaleTimeString("es-ES")} ${snapDate}`;
+    render();
+  }catch(err){
+    document.getElementById("tableWrap").innerHTML = `<div class="loading" style="text-align:left;">
+      No se ha podido conectar con fantasy-data (los proxies disponibles han fallado).<br/><br/>
+      Como alternativa, abre <span class="mono">${DATA_REPO_BASE}/latest.json</span> en una pestaña, copia todo el JSON y pégalo aquí:
+      <textarea id="manualJson" style="width:100%; height:120px; margin-top:10px; background:var(--pitch-deep); border:1px solid var(--pitch-line); color:var(--chalk); border-radius:8px; padding:8px; font-family:'JetBrains Mono',monospace; font-size:11px;"></textarea>
+      <div style="margin-top:10px;"><button class="btn-primary" id="manualLoadBtn" style="width:auto; padding:8px 18px;">Cargar datos pegados</button></div>
+    </div>`;
+    document.getElementById("statusBox").textContent = "sin conexión con fantasy-data";
+    document.getElementById("manualLoadBtn").onclick = async () => {
+      try{
+        const latest = JSON.parse(document.getElementById("manualJson").value);
+        const values = latest.values || {};
+        players = Object.keys(values).map(key => {
+          const v = values[key];
+          const entry = (v && typeof v === "object") ? v : {value: v};
+          return {
+            id: key,
+            nickname: entry.name || key,
+            positionId: POSITION_NAME_TO_ID[entry.position] || 0,
+            teamAbbr: entry.team || "—",
+            marketValue: Number(entry.value),
+            points: null,
+            averagePoints: null,
+            playerStatus: null
+          };
+        });
+        document.getElementById("statusBox").innerHTML = `<b>${players.length}</b> jugadores · cargado manualmente`;
+        await loadPrevSnapshot();
+        render();
+      }catch(e){
+        alert("Ese texto no es un JSON válido. Copia el contenido completo de latest.json y vuelve a intentarlo.");
+      }
+    };
+  }
+}
+init();
+</script>
+</body>
+</html>
