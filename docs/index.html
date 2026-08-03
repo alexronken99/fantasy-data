@@ -300,8 +300,11 @@ async function loadPrevSnapshot(){
 }
 
 function trendFor(p){
-  const entry = prevSnapshot.values ? prevSnapshot.values[p.id] : null;
-  const prevVal = entry && typeof entry === "object" ? entry.value : entry;
+  let prevVal = p.prevValue;
+  if(prevVal == null){
+    const entry = prevSnapshot.values ? prevSnapshot.values[p.id] : null;
+    prevVal = entry && typeof entry === "object" ? entry.value : entry;
+  }
   if(prevVal == null) return {diff:0, dir:"flat"};
   const diff = p.marketValue - prevVal;
   return {diff, dir: diff > 0 ? "up" : diff < 0 ? "down" : "flat"};
@@ -352,6 +355,7 @@ async function fetchPlayers(){
       positionId: POSITION_NAME_TO_ID[entry.position] || 0,
       teamAbbr: entry.team || "—",
       marketValue: Number(entry.value),
+      prevValue: entry.prevValue != null ? Number(entry.prevValue) : null,
       points: null,
       averagePoints: null,
       playerStatus: null
@@ -614,6 +618,7 @@ async function init(){
             positionId: POSITION_NAME_TO_ID[entry.position] || 0,
             teamAbbr: entry.team || "—",
             marketValue: Number(entry.value),
+            prevValue: entry.prevValue != null ? Number(entry.prevValue) : null,
             points: null,
             averagePoints: null,
             playerStatus: null
