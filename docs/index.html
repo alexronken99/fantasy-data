@@ -258,7 +258,7 @@
     <label>Fecha y hora de la operación</label>
     <input type="datetime-local" id="mpDate" />
     <label>Cláusula pagada (opcional, €)</label>
-    <input type="text" id="mpClause" placeholder="p. ej. 4200000" />
+    <input type="text" id="mpClause" placeholder="p. ej. 4.2 (= 4.200.000€)" />
     <div class="modal-actions">
       <button class="btn-secondary" id="mpCancel">Cancelar</button>
       <button class="btn-primary" id="mpSave">Guardar</button>
@@ -277,14 +277,14 @@
     </div>
     <div id="editRaiseFields">
       <label>Nueva cláusula (€)</label>
-      <input type="text" id="raiseAmount" placeholder="p. ej. 40000000" />
+      <input type="text" id="raiseAmount" placeholder="p. ej. 40 (= 40.000.000€)" />
     </div>
     <div id="editTransferFields" style="display:none;">
       <label>Nuevo manager</label>
       <div class="manager-slider" id="transferManagerSlider"></div>
       <input type="hidden" id="transferManager" />
       <label>Nueva cláusula (€)</label>
-      <input type="text" id="transferClause" placeholder="p. ej. 12000000" />
+      <input type="text" id="transferClause" placeholder="p. ej. 12 (= 12.000.000€)" />
       <label>Fecha y hora de la operación</label>
       <input type="datetime-local" id="transferDate" />
     </div>
@@ -304,7 +304,7 @@
     <h3 id="conflictName">Jugador</h3>
     <p class="mp-team" id="conflictInfo"></p>
     <label>Cláusula (€)</label>
-    <input type="text" id="conflictClause" placeholder="p. ej. 4200000" />
+    <input type="text" id="conflictClause" placeholder="p. ej. 4.2 (= 4.200.000€)" />
     <label>Fecha y hora del fichaje</label>
     <input type="datetime-local" id="conflictDate" />
     <div class="modal-actions">
@@ -437,8 +437,15 @@ function nowLocalDatetime(){
 
 function parseEuroInput(str){
   if(!str) return null;
-  const cleaned = String(str).replace(/[^\d]/g, "");
-  return cleaned ? Number(cleaned) : null;
+  const normalized = String(str).replace(",", ".").trim();
+  const num = parseFloat(normalized);
+  if(isNaN(num)) return null;
+  return Math.round(num * 1000000);
+}
+
+function toMillionsInput(n){
+  if(n == null) return "";
+  return String(n / 1000000);
 }
 
 function fechaLabelFor(fecha){
@@ -725,7 +732,7 @@ function mktColumnValue(e, player, key){
     case "value": return player ? player.marketValue : -Infinity;
     case "trend": return player ? trendFor(player).diff : 0;
     case "clausula": return e.clausula || 0;
-    case "diff": return (player && e.clausula) ? player.marketValue - e.clausula : -Infinity;
+    case "diff": return (player && e.clausula) ? e.clausula - player.marketValue : -Infinity;
     case "libera": return mktMsRestantes(e);
     case "fichado": return new Date(e.fecha).getTime();
     default: return 0;
@@ -771,7 +778,7 @@ function renderMercadoView(){
   }
   const mktCols = [
     ["name","Jugador"], ["team","Equipo"], ["pos","Posición"], ["manager","Manager"], ["value","Valor actual"],
-    ["trend","Tendencia"], ["clausula","Cláusula pagada"], ["diff","Diferencia"], ["fichado","Fichado"], ["libera","Libera en"]
+    ["trend","Tendencia"], ["clausula","Cláusula pagada"], ["diff","Diferencia"], ["libera","Libera en"]
   ];
   let html = "<table><thead><tr>" + mktCols.map(([key,label]) =>
     `<th data-sort-key="${key}" data-table="mkt">${label}${sortArrow(key, mktSortKey, mktSortDir)}</th>`
@@ -784,7 +791,7 @@ function renderMercadoView(){
     const valorActual = player ? player.marketValue : null;
     const t = player ? trendFor(player) : {diff:0, dir:"flat"};
     const arrow = t.dir === "up" ? "▲" : t.dir === "down" ? "▼" : "＝";
-    const diff = (valorActual != null && e.clausula) ? valorActual - e.clausula : null;
+    const diff = (valorActual != null && e.clausula) ? e.clausula - valorActual : null;
     const diffClass = diff == null ? "" : diff >= 0 ? "diff-pos" : "diff-neg";
     const diffLabel = diff == null ? "—" : (diff >= 0 ? "+" : "") + fmtEuro(diff);
 
@@ -797,8 +804,7 @@ function renderMercadoView(){
       <td class="trend ${t.dir}">${arrow} ${t.diff !== 0 ? fmtEuro(Math.abs(t.diff)) : "—"}</td>
       <td class="pval">${e.clausula ? fmtEuro(e.clausula) : "—"}</td>
       <td class="${diffClass}">${diffLabel}</td>
-      <td class="ppts">${fechaLabelFor(e.fecha)}</td>
-      <td>${liberaLabel}</td>
+      <td>${liberaLabel}<br><span class="ppts" style="font-size:11px;">fichado ${fechaLabelFor(e.fecha)}</span></td>
       <td>
         <button class="rm-btn" data-edit-key="${e.key}" title="Subir cláusula / transferir">✏️</button>
         <button class="rm-btn" data-key="${e.key}" title="Dejar de seguir">✕</button>
@@ -1100,7 +1106,7 @@ function openEditModal(entryKey){
   const player = players.find(p => String(p.id) === String(entry.playerId));
   document.getElementById("editName").textContent = player ? player.nickname : entry.nombre;
   document.getElementById("editInfo").textContent = `Manager actual: ${entry.rival} · Cláusula actual: ${entry.clausula ? fmtEuro(entry.clausula) : "sin registrar"}`;
-  document.getElementById("raiseAmount").value = entry.clausula || "";
+  document.getElementById("raiseAmount").value = toMillionsInput(entry.clausula);
   document.getElementById("transferManager").value = "";
   buildManagerChips("transferManagerSlider", "transferManager", "");
   document.getElementById("transferClause").value = "";
@@ -1120,7 +1126,7 @@ function openConflictModal(existingEntry, player){
   document.getElementById("conflictName").textContent = player ? player.nickname : existingEntry.nombre;
   document.getElementById("conflictInfo").innerHTML =
     `Ya está en Mercado con <b>${existingEntry.rival}</b> · Cláusula actual: ${existingEntry.clausula ? fmtEuro(existingEntry.clausula) : "sin registrar"} · Libera en: ${liberaLabelFor(existingEntry)}`;
-  document.getElementById("conflictClause").value = existingEntry.clausula || "";
+  document.getElementById("conflictClause").value = toMillionsInput(existingEntry.clausula);
   document.getElementById("conflictDate").value = existingEntry.fecha || nowLocalDatetime();
   document.getElementById("conflictOverlay").classList.add("show");
 }
