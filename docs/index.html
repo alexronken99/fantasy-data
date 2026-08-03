@@ -514,7 +514,10 @@ function syncSeguimientoReset(){
 
 async function resyncAllSeguimiento(){
   syncSeguimientoReset();
-  radarEntries.forEach(entry => syncSeguimiento("add", entry));
+  for(const entry of radarEntries){
+    syncSeguimiento("add", entry);
+    await new Promise(r => setTimeout(r, 250));
+  }
 }
 
 async function loadStorage(){
