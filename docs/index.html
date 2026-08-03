@@ -525,6 +525,7 @@ async function fetchPlayers(){
       teamAbbr: entry.team || "—",
       marketValue: Number(entry.value),
       prevValue: entry.prevValue != null ? Number(entry.prevValue) : null,
+      startProb: entry.probabilidad != null ? Number(entry.probabilidad) : null,
       points: null,
       averagePoints: null,
       playerStatus: null
@@ -542,6 +543,7 @@ function jugColumnValue(p, key, ratio){
     case "points": return p.points || 0;
     case "avg": return p.averagePoints || 0;
     case "sugerida": return ratio ? p.marketValue * ratio.avg : 0;
+    case "titular": return p.startProb != null ? p.startProb : -1;
     case "rival": { const nf = nextFixtureFor(p.teamAbbr); return nf ? (nf.dificultad||0) : -1; }
     default: return 0;
   }
@@ -579,6 +581,12 @@ function difficultyLabel(d){
   return {text: (map[d] ? map[d][0] : "—"), cls: (map[d] ? map[d][1] : "")};
 }
 
+function startProbLabel(prob){
+  if(prob == null) return `<span class="ppts">—</span>`;
+  const cls = prob >= 70 ? "diff-pos" : prob >= 40 ? "" : "diff-neg";
+  return `<span class="${cls}">${prob}%</span>`;
+}
+
 function learnedBidRatio(){
   const withData = radarEntries.filter(e => e.clausula && e.valorAlFichar);
   if(withData.length === 0) return null;
@@ -599,7 +607,7 @@ function renderTable(){
 
   const cols = [
     ["name","Jugador"], ["team","Equipo"], ["pos","Posición"], ["value","Valor"], ["trend","Tendencia"],
-    ["points","Puntos"], ["avg","Media"], ["sugerida","Puja sugerida"], ["rival","Próx. rival"]
+    ["points","Puntos"], ["avg","Media"], ["sugerida","Puja sugerida"], ["titular","Titular"], ["rival","Próx. rival"]
   ];
   let html = "<table><thead><tr>" + cols.map(([key,label]) =>
     `<th data-sort-key="${key}" data-table="jug">${label}${sortArrow(key, jugSortKey, jugSortDir)}</th>`
@@ -625,6 +633,7 @@ function renderTable(){
       <td class="ppts">${p.points ?? "—"}</td>
       <td class="ppts">${p.averagePoints ? p.averagePoints.toFixed(2) : "—"}</td>
       <td class="pval">${sugerida}</td>
+      <td>${startProbLabel(p.startProb)}</td>
       <td class="ppts">${rivalCell}</td>
       <td><button class="track-btn" data-id="${p.id}">Marcar</button></td>
     </tr>`;
@@ -816,7 +825,9 @@ function playerOnceScore(p){
   const t = trendFor(p);
   const nf = nextFixtureFor(p.teamAbbr);
   const dificultad = nf && nf.dificultad ? nf.dificultad : 3;
-  return (t.diff / 1000000) - (dificultad - 3) * 0.5;
+  const base = (t.diff / 1000000) - (dificultad - 3) * 0.5;
+  const prob = p.startProb != null ? p.startProb : 60; // sin dato, asumimos duda moderada
+  return base * (prob / 100);
 }
 
 function computeRecommendedOnce(){
@@ -886,7 +897,7 @@ function renderOnceView(){
       <div class="pitch-row">${onceCard(result.gk, result.captain)}</div>
     </div>
     <div class="sub" style="margin-top:14px; color:var(--chalk-dim); font-size:12px;">
-      El número bajo cada jugador combina su tendencia de valor reciente y la dificultad de su próximo rival — no son puntos de fantasy reales, es una estimación mientras no tengamos más datos de la temporada. La <b>C</b> marca al capitán elegido (puntúa doble).
+      El número bajo cada jugador combina su tendencia de valor reciente, la dificultad de su próximo rival y su probabilidad de ser titular — no son puntos de fantasy reales, es una estimación mientras no tengamos más datos de la temporada. La <b>C</b> marca al capitán elegido (puntúa doble).
     </div>
   `;
 }
@@ -1068,6 +1079,7 @@ async function init(){
             teamAbbr: entry.team || "—",
             marketValue: Number(entry.value),
             prevValue: entry.prevValue != null ? Number(entry.prevValue) : null,
+            startProb: entry.probabilidad != null ? Number(entry.probabilidad) : null,
             points: null,
             averagePoints: null,
             playerStatus: null
