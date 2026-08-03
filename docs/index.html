@@ -22,9 +22,7 @@
   *{box-sizing:border-box;}
   html,body{margin:0;padding:0;background:var(--pitch-deep);color:var(--chalk);font-family:'Inter',sans-serif;}
   body{
-    background-image:
-      repeating-linear-gradient(0deg, rgba(233,236,229,0.025) 0px, rgba(233,236,229,0.025) 1px, transparent 1px, transparent 64px),
-      radial-gradient(ellipse at top, #123526 0%, var(--pitch-deep) 60%);
+    background-image: radial-gradient(ellipse at top, #123526 0%, var(--pitch-deep) 60%);
     min-height:100vh;
   }
   .display{font-family:'Teko',sans-serif; font-weight:600; letter-spacing:0.02em;}
@@ -131,7 +129,7 @@
 
   .overlay{position:fixed; inset:0; background:rgba(6,18,14,0.75); display:none; align-items:center; justify-content:center; z-index:50;}
   .overlay.show{display:flex;}
-  .modal{background:var(--panel); border:1px solid var(--pitch-line); border-radius:14px; padding:24px; width:340px;}
+  .modal{background:var(--panel); border:1px solid var(--pitch-line); border-radius:14px; padding:24px; width:340px; position:relative;}
   .modal h3{margin:0 0 4px; font-size:24px; text-transform:uppercase; font-family:'Teko',sans-serif;}
   .modal p.mp-team{color:var(--chalk-dim); font-size:12px; margin:0 0 16px;}
   .modal label{display:block; font-size:11px; color:var(--chalk-dim); text-transform:uppercase; letter-spacing:0.04em; margin:12px 0 4px;}
@@ -275,6 +273,7 @@
     <div class="modal-actions" style="margin-top:0; margin-bottom:16px;">
       <button class="btn-secondary" id="editModeRaise" style="flex:1;">Subir cláusula</button>
       <button class="btn-secondary" id="editModeTransfer" style="flex:1;">Transferir</button>
+      <button class="btn-secondary" id="editModeSell" style="flex:1;">Vender al mercado</button>
     </div>
     <div id="editRaiseFields">
       <label>Nueva cláusula (€)</label>
@@ -289,9 +288,28 @@
       <label>Fecha y hora de la operación</label>
       <input type="datetime-local" id="transferDate" />
     </div>
+    <div id="editSellFields" style="display:none;">
+      <p class="mp-team" style="margin-top:12px;">Se dejará de seguir a este jugador (vuelve a ser libre, ya no lo tiene ningún manager).</p>
+    </div>
     <div class="modal-actions">
       <button class="btn-secondary" id="editCancel">Cancelar</button>
       <button class="btn-primary" id="editSave">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="conflictOverlay">
+  <div class="modal">
+    <button id="conflictClose" style="position:absolute; top:14px; right:16px; background:none; border:none; color:var(--chalk-dim); font-size:18px; cursor:pointer;">✕</button>
+    <h3 id="conflictName">Jugador</h3>
+    <p class="mp-team" id="conflictInfo"></p>
+    <label>Cláusula (€)</label>
+    <input type="text" id="conflictClause" placeholder="p. ej. 4200000" />
+    <label>Fecha y hora del fichaje</label>
+    <input type="datetime-local" id="conflictDate" />
+    <div class="modal-actions">
+      <button class="btn-secondary" id="conflictCancel">Cancelar</button>
+      <button class="btn-primary" id="conflictSave">Actualizar</button>
     </div>
   </div>
 </div>
@@ -415,6 +433,37 @@ function nowLocalDatetime(){
   const d = new Date();
   const pad = n => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function parseEuroInput(str){
+  if(!str) return null;
+  const cleaned = String(str).replace(/[^\d]/g, "");
+  return cleaned ? Number(cleaned) : null;
+}
+
+function fechaLabelFor(fecha){
+  const d = new Date(fecha);
+  if(isNaN(d)) return "—";
+  const pad = n => String(n).padStart(2, "0");
+  return `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function mktMsRestantes(e){
+  const compra = new Date(e.fecha);
+  const liberaEn = new Date(compra.getTime() + 14*24*60*60*1000);
+  return liberaEn - new Date();
+}
+
+function liberaLabelFor(e){
+  const ms = mktMsRestantes(e);
+  if(ms <= 0) return "Ya libre";
+  const totalMinutes = Math.floor(ms / 60000);
+  if(totalMinutes < 72 * 60){
+    const h = Math.floor(totalMinutes / 60);
+    const m = totalMinutes % 60;
+    return `${h}h ${m}min`;
+  }
+  return Math.ceil(ms / 86400000) + " días";
 }
 
 const DATA_REPO_BASE = "https://raw.githubusercontent.com/alexronken99/fantasy-data/main";
@@ -667,12 +716,6 @@ function ringSVG(pct, color){
   <circle cx="28" cy="28" r="${r}" stroke="${color}" stroke-width="5" fill="none" stroke-dasharray="${c}" stroke-dashoffset="${offset}" stroke-linecap="round"/></svg>`;
 }
 
-function mktDiasRestantes(e){
-  const compra = new Date(e.fecha);
-  const liberaEn = new Date(compra); liberaEn.setDate(liberaEn.getDate() + 14);
-  return Math.ceil((liberaEn - new Date()) / 86400000);
-}
-
 function mktColumnValue(e, player, key){
   switch(key){
     case "name": return (player ? player.nickname : e.nombre).toLowerCase();
@@ -683,7 +726,8 @@ function mktColumnValue(e, player, key){
     case "trend": return player ? trendFor(player).diff : 0;
     case "clausula": return e.clausula || 0;
     case "diff": return (player && e.clausula) ? player.marketValue - e.clausula : -Infinity;
-    case "libera": return mktDiasRestantes(e);
+    case "libera": return mktMsRestantes(e);
+    case "fichado": return new Date(e.fecha).getTime();
     default: return 0;
   }
 }
@@ -700,7 +744,7 @@ function sortMercadoEntries(filtered){
     });
   } else {
     withPlayer.sort((a,b) => {
-      const da = mktDiasRestantes(a.e), db = mktDiasRestantes(b.e);
+      const da = mktMsRestantes(a.e), db = mktMsRestantes(b.e);
       const groupA = da <= 0 ? 0 : 1, groupB = db <= 0 ? 0 : 1;
       if(groupA !== groupB) return groupA - groupB;
       if(groupA === 0){
@@ -727,16 +771,16 @@ function renderMercadoView(){
   }
   const mktCols = [
     ["name","Jugador"], ["team","Equipo"], ["pos","Posición"], ["manager","Manager"], ["value","Valor actual"],
-    ["trend","Tendencia"], ["clausula","Cláusula pagada"], ["diff","Diferencia"], ["libera","Libera en"]
+    ["trend","Tendencia"], ["clausula","Cláusula pagada"], ["diff","Diferencia"], ["fichado","Fichado"], ["libera","Libera en"]
   ];
   let html = "<table><thead><tr>" + mktCols.map(([key,label]) =>
     `<th data-sort-key="${key}" data-table="mkt">${label}${sortArrow(key, mktSortKey, mktSortDir)}</th>`
   ).join("") + "<th></th></tr></thead><tbody>";
 
   sortMercadoEntries(filtered).forEach(({e, player}) => {
-    const diasRestantes = mktDiasRestantes(e);
-    const rowClass = diasRestantes <= 0 ? "" : diasRestantes <= 3 ? "mkt-soon" : "";
-    const liberaLabel = diasRestantes <= 0 ? "Ya libre" : diasRestantes + " días";
+    const msRestantes = mktMsRestantes(e);
+    const rowClass = msRestantes <= 0 ? "" : msRestantes <= 72*3600000 ? "mkt-soon" : "";
+    const liberaLabel = liberaLabelFor(e);
     const valorActual = player ? player.marketValue : null;
     const t = player ? trendFor(player) : {diff:0, dir:"flat"};
     const arrow = t.dir === "up" ? "▲" : t.dir === "down" ? "▼" : "＝";
@@ -753,6 +797,7 @@ function renderMercadoView(){
       <td class="trend ${t.dir}">${arrow} ${t.diff !== 0 ? fmtEuro(Math.abs(t.diff)) : "—"}</td>
       <td class="pval">${e.clausula ? fmtEuro(e.clausula) : "—"}</td>
       <td class="${diffClass}">${diffLabel}</td>
+      <td class="ppts">${fechaLabelFor(e.fecha)}</td>
       <td>${liberaLabel}</td>
       <td>
         <button class="rm-btn" data-edit-key="${e.key}" title="Subir cláusula / transferir">✏️</button>
@@ -782,6 +827,9 @@ function renderMercadoView(){
   });
 }
 
+let equiposSortKey = "total";
+let equiposSortDir = -1;
+
 function renderEquiposView(){
   const box = document.getElementById("equiposWrap");
   if(radarEntries.length === 0){
@@ -792,31 +840,44 @@ function renderEquiposView(){
   radarEntries.forEach(e => {
     const player = players.find(p => String(p.id) === String(e.playerId));
     const manager = e.rival || "Sin nombre";
-    if(!byManager[manager]) byManager[manager] = {manager, count:0, total:0, clausulaTotal:0, trendTotal:0};
+    if(!byManager[manager]) byManager[manager] = {manager, count:0, total:0, clausulaTotal:0};
     byManager[manager].count++;
-    if(player){
-      byManager[manager].total += player.marketValue;
-      byManager[manager].trendTotal += trendFor(player).diff;
-    }
+    if(player) byManager[manager].total += player.marketValue;
     if(e.clausula) byManager[manager].clausulaTotal += e.clausula;
   });
-  const rows = Object.values(byManager).sort((a,b)=> b.total - a.total);
-  let html = `<table><thead><tr>
-    <th>Manager</th><th>Jugadores</th><th>Valor total</th><th>Invertido en cláusulas</th><th>Tendencia total</th>
-  </tr></thead><tbody>`;
+  let rows = Object.values(byManager);
+  const key = equiposSortKey, dir = equiposSortDir;
+  rows.sort((a,b) => {
+    const va = key === "manager" ? a.manager.toLowerCase() : (key === "count" ? a.count : key === "clausulaTotal" ? a.clausulaTotal : a.total);
+    const vb = key === "manager" ? b.manager.toLowerCase() : (key === "count" ? b.count : key === "clausulaTotal" ? b.clausulaTotal : b.total);
+    if(va < vb) return -1 * dir;
+    if(va > vb) return 1 * dir;
+    return 0;
+  });
+
+  const eqCols = [["manager","Manager"], ["count","Jugadores"], ["total","Valor total"], ["clausulaTotal","Invertido en cláusulas"]];
+  let html = "<table><thead><tr>" + eqCols.map(([k,label]) =>
+    `<th data-sort-key="${k}">${label}${sortArrow(k, equiposSortKey, equiposSortDir)}</th>`
+  ).join("") + "</tr></thead><tbody>";
   rows.forEach(r => {
-    const cls = r.trendTotal > 0 ? "up" : r.trendTotal < 0 ? "down" : "flat";
-    const arrow = r.trendTotal > 0 ? "▲" : r.trendTotal < 0 ? "▼" : "＝";
     html += `<tr>
       <td class="pname">${r.manager}</td>
       <td class="ppts">${r.count}</td>
       <td class="pval">${fmtEuro(r.total)}</td>
       <td class="pval">${r.clausulaTotal ? fmtEuro(r.clausulaTotal) : "—"}</td>
-      <td class="trend ${cls}">${arrow} ${r.trendTotal !== 0 ? fmtEuro(Math.abs(r.trendTotal)) : "—"}</td>
     </tr>`;
   });
   html += "</tbody></table>";
   box.innerHTML = html;
+
+  document.querySelectorAll('#equiposWrap th[data-sort-key]').forEach(th => {
+    th.onclick = () => {
+      const k = th.dataset.sortKey;
+      if(equiposSortKey === k){ equiposSortDir = equiposSortDir === 1 ? -1 : 1; }
+      else { equiposSortKey = k; equiposSortDir = 1; }
+      renderEquiposView();
+    };
+  });
 }
 
 const MY_MANAGER = "La Pimienta FC";
@@ -984,6 +1045,11 @@ document.querySelectorAll("#viewTabs button").forEach(btn => {
 
 function openModal(playerId){
   const p = players.find(pl => String(pl.id) === String(playerId));
+  const existing = radarEntries.find(e => String(e.playerId) === String(playerId));
+  if(existing){
+    openConflictModal(existing, p);
+    return;
+  }
   document.getElementById("mpName").textContent = p.nickname;
   document.getElementById("mpTeam").textContent = p.teamAbbr + " · " + POSITIONS[p.positionId] + " · valor actual " + fmtEuro(p.marketValue);
   document.getElementById("mpRival").value = "";
@@ -994,7 +1060,7 @@ function openModal(playerId){
   document.getElementById("mpSave").onclick = async () => {
     const rival = document.getElementById("mpRival").value.trim();
     const fecha = document.getElementById("mpDate").value;
-    const clausula = document.getElementById("mpClause").value.trim();
+    const clausula = parseEuroInput(document.getElementById("mpClause").value);
     if(!rival || !fecha) return;
     radarEntries.push({
       key: p.id + "_" + Date.now(),
@@ -1002,7 +1068,7 @@ function openModal(playerId){
       nombre: p.nickname,
       rival,
       fecha,
-      clausula: clausula ? Number(clausula) : null,
+      clausula,
       valorAlFichar: p.marketValue
     });
     await saveRadar();
@@ -1021,8 +1087,10 @@ function setEditMode(mode){
   editMode = mode;
   document.getElementById("editRaiseFields").style.display = mode === "raise" ? "" : "none";
   document.getElementById("editTransferFields").style.display = mode === "transfer" ? "" : "none";
+  document.getElementById("editSellFields").style.display = mode === "sell" ? "" : "none";
   document.getElementById("editModeRaise").classList.toggle("active", mode === "raise");
   document.getElementById("editModeTransfer").classList.toggle("active", mode === "transfer");
+  document.getElementById("editModeSell").classList.toggle("active", mode === "sell");
 }
 
 function openEditModal(entryKey){
@@ -1043,6 +1111,33 @@ function openEditModal(entryKey){
 
 document.getElementById("editModeRaise").onclick = () => setEditMode("raise");
 document.getElementById("editModeTransfer").onclick = () => setEditMode("transfer");
+document.getElementById("editModeSell").onclick = () => setEditMode("sell");
+
+let conflictKey = null;
+
+function openConflictModal(existingEntry, player){
+  conflictKey = existingEntry.key;
+  document.getElementById("conflictName").textContent = player ? player.nickname : existingEntry.nombre;
+  document.getElementById("conflictInfo").innerHTML =
+    `Ya está en Mercado con <b>${existingEntry.rival}</b> · Cláusula actual: ${existingEntry.clausula ? fmtEuro(existingEntry.clausula) : "sin registrar"} · Libera en: ${liberaLabelFor(existingEntry)}`;
+  document.getElementById("conflictClause").value = existingEntry.clausula || "";
+  document.getElementById("conflictDate").value = existingEntry.fecha || nowLocalDatetime();
+  document.getElementById("conflictOverlay").classList.add("show");
+}
+
+document.getElementById("conflictClose").onclick = () => document.getElementById("conflictOverlay").classList.remove("show");
+document.getElementById("conflictCancel").onclick = () => document.getElementById("conflictOverlay").classList.remove("show");
+document.getElementById("conflictOverlay").onclick = (e) => { if(e.target.id === "conflictOverlay") e.currentTarget.classList.remove("show"); };
+
+document.getElementById("conflictSave").onclick = async () => {
+  const entry = radarEntries.find(e => e.key === conflictKey);
+  if(!entry) return;
+  entry.clausula = parseEuroInput(document.getElementById("conflictClause").value);
+  entry.fecha = document.getElementById("conflictDate").value;
+  await saveRadar();
+  document.getElementById("conflictOverlay").classList.remove("show");
+  render();
+};
 
 document.getElementById("editCancel").onclick = () => document.getElementById("editOverlay").classList.remove("show");
 document.getElementById("editOverlay").onclick = (e) => { if(e.target.id === "editOverlay") e.currentTarget.classList.remove("show"); };
@@ -1052,19 +1147,21 @@ document.getElementById("editSave").onclick = async () => {
   if(!entry) return;
 
   if(editMode === "raise"){
-    const amount = Number(document.getElementById("raiseAmount").value);
+    const amount = parseEuroInput(document.getElementById("raiseAmount").value);
     if(!amount) return;
     entry.clausula = amount;
-  } else {
+  } else if(editMode === "transfer"){
     const manager = document.getElementById("transferManager").value.trim();
-    const clauseVal = document.getElementById("transferClause").value.trim();
+    const clauseVal = parseEuroInput(document.getElementById("transferClause").value);
     const date = document.getElementById("transferDate").value;
     if(!manager || !date) return;
     const player = players.find(p => String(p.id) === String(entry.playerId));
     entry.rival = manager;
-    entry.clausula = clauseVal ? Number(clauseVal) : null;
+    entry.clausula = clauseVal;
     entry.fecha = date;
     entry.valorAlFichar = player ? player.marketValue : entry.valorAlFichar;
+  } else if(editMode === "sell"){
+    radarEntries = radarEntries.filter(e => e.key !== editEntryKey);
   }
 
   await saveRadar();
