@@ -238,6 +238,7 @@
     <input type="text" class="combo" id="teamFilterInputMkt" list="teamOptions" placeholder="Equipo…" />
     <input type="text" class="combo" id="managerFilterInput" list="managerOptions" placeholder="Manager…" />
     <datalist id="managerOptions"></datalist>
+    <button class="btn-secondary" id="resyncBtn" style="width:auto; padding:10px 14px;" title="Sube de nuevo todo lo que ya tienes en Mercado al puente de Telegram">🔄 Resincronizar</button>
   </div>
   <div id="mercadoWrap"><div class="empty-radar">Aún no sigues ninguna cláusula. Pulsa "Marcar" en un jugador de la pestaña Jugadores.</div></div>
 </div>
@@ -480,6 +481,41 @@ function liberaLabelFor(e){
 }
 
 const DATA_REPO_BASE = "https://raw.githubusercontent.com/alexronken99/fantasy-data/main";
+
+const SEGUIMIENTO_BRIDGE_URL = "https://script.google.com/macros/s/AKfycbw5ZwDQxxavcur3oIEfI-ZJK_DxpfH88McuGuhvu0GoBnXWyGEQB6nNK_PJkUeoxI0/exec";
+
+function syncSeguimiento(action, entry){
+  try{
+    fetch(SEGUIMIENTO_BRIDGE_URL, {
+      method: "POST",
+      mode: "no-cors",
+      headers: {"Content-Type": "text/plain;charset=utf-8"},
+      body: JSON.stringify({
+        action,
+        key: entry.key,
+        jugador: entry.nombre,
+        manager: entry.rival,
+        fecha: entry.fecha
+      })
+    });
+  }catch(e){ /* fallo silencioso: no debe romper el uso normal del dashboard */ }
+}
+
+function syncSeguimientoReset(){
+  try{
+    fetch(SEGUIMIENTO_BRIDGE_URL, {
+      method: "POST",
+      mode: "no-cors",
+      headers: {"Content-Type": "text/plain;charset=utf-8"},
+      body: JSON.stringify({action: "reset"})
+    });
+  }catch(e){}
+}
+
+async function resyncAllSeguimiento(){
+  syncSeguimientoReset();
+  radarEntries.forEach(entry => syncSeguimiento("add", entry));
+}
 
 async function loadStorage(){
   try{
@@ -873,6 +909,7 @@ function renderMercadoView(){
   });
   document.querySelectorAll("#mercadoWrap .rm-btn[data-key]").forEach(btn => {
     btn.onclick = async () => {
+      syncSeguimiento("remove", {key: btn.dataset.key});
       radarEntries = radarEntries.filter(e => e.key !== btn.dataset.key);
       await saveRadar();
       renderMercadoView();
@@ -1141,6 +1178,7 @@ function openModal(playerId){
       clausula,
       valorAlFichar: p.marketValue
     });
+    syncSeguimiento("add", radarEntries[radarEntries.length - 1]);
     await saveRadar();
     populateFilterOptions();
     document.getElementById("overlay").classList.remove("show");
@@ -1202,8 +1240,10 @@ document.getElementById("conflictOverlay").onclick = (e) => { if(e.target.id ===
 document.getElementById("conflictSave").onclick = async () => {
   const entry = radarEntries.find(e => e.key === conflictKey);
   if(!entry) return;
+  syncSeguimiento("remove", {key: entry.key});
   entry.clausula = parseEuroInput(document.getElementById("conflictClause").value);
   entry.fecha = document.getElementById("conflictDate").value;
+  syncSeguimiento("add", entry);
   await saveRadar();
   document.getElementById("conflictOverlay").classList.remove("show");
   render();
@@ -1226,11 +1266,14 @@ document.getElementById("editSave").onclick = async () => {
     const date = document.getElementById("transferDate").value;
     if(!manager || !date) return;
     const player = players.find(p => String(p.id) === String(entry.playerId));
+    syncSeguimiento("remove", {key: entry.key});
     entry.rival = manager;
     entry.clausula = clauseVal;
     entry.fecha = date;
     entry.valorAlFichar = player ? player.marketValue : entry.valorAlFichar;
+    syncSeguimiento("add", entry);
   } else if(editMode === "sell"){
+    syncSeguimiento("remove", {key: editEntryKey});
     radarEntries = radarEntries.filter(e => e.key !== editEntryKey);
   }
 
@@ -1247,6 +1290,10 @@ document.getElementById("teamFilterInput").addEventListener("input", (e) => { te
 document.getElementById("posFilterInputMkt").addEventListener("input", (e) => { posFilterText = e.target.value; renderMercadoView(); });
 document.getElementById("teamFilterInputMkt").addEventListener("input", (e) => { teamFilterText = e.target.value; renderMercadoView(); });
 document.getElementById("managerFilterInput").addEventListener("input", (e) => { managerFilterText = e.target.value; renderMercadoView(); });
+document.getElementById("resyncBtn").addEventListener("click", async () => {
+  await resyncAllSeguimiento();
+  alert("Se ha mandado todo lo que hay en Mercado al puente de Telegram.");
+});
 
 async function init(){
   await loadStorage();
