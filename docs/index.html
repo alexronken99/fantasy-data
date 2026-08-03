@@ -180,6 +180,13 @@
   .pitch-card .pscore{display:block; font-size:10px; color:var(--chalk-dim); font-family:'JetBrains Mono',monospace; margin-top:2px;}
   .formation-label{font-family:'Teko',sans-serif; font-size:22px; color:var(--turf); text-transform:uppercase; margin-bottom:10px;}
   .btn-secondary.active{background:var(--turf-dim); color:var(--pitch-deep); border-color:var(--turf); font-weight:700;}
+  .manager-slider{display:flex; gap:8px; overflow-x:auto; padding:6px 2px; margin-bottom:4px;}
+  .manager-chip{cursor:pointer; opacity:0.5; transition:opacity 0.15s; flex:none;}
+  .manager-chip.selected{opacity:1; box-shadow:0 0 0 2px var(--turf);}
+  .captain-badge{
+    display:inline-block; background:var(--amber); color:#1a1a1a; font-weight:700; font-size:10px;
+    border-radius:50%; width:16px; height:16px; line-height:16px; text-align:center; margin-left:4px;
+  }
 </style>
 </head>
 <body>
@@ -248,7 +255,8 @@
     <h3 id="mpName">Jugador</h3>
     <p class="mp-team" id="mpTeam"></p>
     <label>Manager (rival o tú mismo)</label>
-    <input type="text" id="mpRival" placeholder="p. ej. Carlos, o tu propio nombre" />
+    <div class="manager-slider" id="mpRivalSlider"></div>
+    <input type="hidden" id="mpRival" />
     <label>Fecha de la operación</label>
     <input type="date" id="mpDate" />
     <label>Cláusula pagada (opcional, €)</label>
@@ -274,7 +282,8 @@
     </div>
     <div id="editTransferFields" style="display:none;">
       <label>Nuevo manager</label>
-      <input type="text" id="transferManager" placeholder="Nombre del manager" />
+      <div class="manager-slider" id="transferManagerSlider"></div>
+      <input type="hidden" id="transferManager" />
       <label>Nueva cláusula (€)</label>
       <input type="text" id="transferClause" placeholder="p. ej. 12000000" />
       <label>Fecha de la operación</label>
@@ -321,6 +330,24 @@ const MANAGER_COLORS = {
 
 const TEAM_CREST_ID = {"ATH":1,"ATM":2,"BAR":3,"BET":4,"CEL":5,"DEP":6,"ESP":7,"GET":8,"LEV":10,"MAL":11,"OSA":13,"RAY":14,"RMA":15,"RSO":16,"SEV":17,"VAL":18,"ELC":21,"VIL":22,"ALA":28,"RAC":42};
 const TEAM_NAME_TO_CREST_ID = {"Alavés":28,"Athletic":1,"Atlético":2,"Barcelona":3,"Betis":4,"Celta":5,"Deportivo":6,"Elche":21,"Espanyol":7,"Getafe":8,"Levante":10,"Málaga":11,"Osasuna":13,"Racing":42,"Rayo":14,"Real Madrid":15,"Real Sociedad":16,"Sevilla":17,"Valencia":18,"Villarreal":22};
+
+const MANAGER_LIST = Object.keys(MANAGER_COLORS);
+
+function buildManagerChips(containerId, hiddenInputId, currentValue){
+  const container = document.getElementById(containerId);
+  container.innerHTML = MANAGER_LIST.map(name => {
+    const c = MANAGER_COLORS[name];
+    const sel = name === currentValue ? " selected" : "";
+    return `<span class="manager-chip mgr-badge${sel}" data-name="${name}" style="background:${c.bg};color:${c.fg};">${name}</span>`;
+  }).join("");
+  container.querySelectorAll(".manager-chip").forEach(chip => {
+    chip.onclick = () => {
+      container.querySelectorAll(".manager-chip").forEach(c => c.classList.remove("selected"));
+      chip.classList.add("selected");
+      document.getElementById(hiddenInputId).value = chip.dataset.name;
+    };
+  });
+}
 
 function teamCrest(teamAbbr){
   if(!teamAbbr) return `<span class="pteam">—</span>`;
@@ -657,8 +684,6 @@ function sortMercadoEntries(filtered){
       return 0;
     });
   } else {
-    // Orden por defecto: primero jugadores ya sin protección de cláusula (ordenados por tendencia
-    // descendente), después el resto ordenados por días restantes ascendente (menos tiempo arriba).
     withPlayer.sort((a,b) => {
       const da = mktDiasRestantes(a.e), db = mktDiasRestantes(b.e);
       const groupA = da <= 0 ? 0 : 1, groupB = db <= 0 ? 0 : 1;
@@ -782,9 +807,9 @@ function renderEquiposView(){
 const MY_MANAGER = "La Pimienta FC";
 
 const ONCE_FORMATIONS = [
-  {def:3,mid:4,fwd:3}, {def:3,mid:5,fwd:2}, {def:3,mid:3,fwd:4},
-  {def:4,mid:3,fwd:3}, {def:4,mid:4,fwd:2}, {def:4,mid:5,fwd:1},
-  {def:5,mid:3,fwd:2}, {def:5,mid:4,fwd:1}, {def:5,mid:2,fwd:3}
+  {def:5,mid:4,fwd:1}, {def:5,mid:3,fwd:2}, {def:5,mid:2,fwd:3},
+  {def:4,mid:6,fwd:0}, {def:4,mid:5,fwd:1}, {def:4,mid:4,fwd:2}, {def:4,mid:3,fwd:3}, {def:4,mid:2,fwd:4},
+  {def:3,mid:6,fwd:1}, {def:3,mid:5,fwd:2}, {def:3,mid:4,fwd:3}, {def:3,mid:3,fwd:4}
 ];
 
 function playerOnceScore(p){
@@ -813,9 +838,13 @@ function computeRecommendedOnce(){
     const defs = byPos[2].slice(0, f.def);
     const mids = byPos[3].slice(0, f.mid);
     const fwds = byPos[4].slice(0, f.fwd);
-    const total = playerOnceScore(gk) + [...defs,...mids,...fwds].reduce((s,p)=>s+playerOnceScore(p),0);
+    const eleven = [gk, ...defs, ...mids, ...fwds];
+    const scores = eleven.map(playerOnceScore);
+    const captainIdx = scores.indexOf(Math.max(...scores));
+    const captain = eleven[captainIdx];
+    const total = scores.reduce((s,v)=>s+v, 0) + scores[captainIdx];
     if(!best || total > best.total){
-      best = {formation: f, gk, defs, mids, fwds, total};
+      best = {formation: f, gk, defs, mids, fwds, captain, total};
     }
   });
 
@@ -823,12 +852,13 @@ function computeRecommendedOnce(){
   return {ok:true, ...best};
 }
 
-function onceCard(p){
+function onceCard(p, captain){
   const score = playerOnceScore(p);
   const scoreLabel = (score >= 0 ? "+" : "") + score.toFixed(1);
+  const isCaptain = captain && String(captain.id) === String(p.id);
   return `<div class="pitch-card">
     ${teamCrest(p.teamAbbr)}
-    <span class="pname">${p.nickname}</span>
+    <span class="pname">${p.nickname}${isCaptain ? '<span class="captain-badge" title="Capitán · puntúa doble">C</span>' : ''}</span>
     <span class="pscore">${scoreLabel}</span>
   </div>`;
 }
@@ -850,13 +880,13 @@ function renderOnceView(){
   box.innerHTML = `
     <div class="formation-label">Formación sugerida: ${label}</div>
     <div class="pitch">
-      <div class="pitch-row">${result.fwds.map(onceCard).join("")}</div>
-      <div class="pitch-row">${result.mids.map(onceCard).join("")}</div>
-      <div class="pitch-row">${result.defs.map(onceCard).join("")}</div>
-      <div class="pitch-row">${onceCard(result.gk)}</div>
+      <div class="pitch-row">${result.fwds.map(p => onceCard(p, result.captain)).join("")}</div>
+      <div class="pitch-row">${result.mids.map(p => onceCard(p, result.captain)).join("")}</div>
+      <div class="pitch-row">${result.defs.map(p => onceCard(p, result.captain)).join("")}</div>
+      <div class="pitch-row">${onceCard(result.gk, result.captain)}</div>
     </div>
     <div class="sub" style="margin-top:14px; color:var(--chalk-dim); font-size:12px;">
-      El número bajo cada jugador combina su tendencia de valor reciente y la dificultad de su próximo rival — no son puntos de fantasy reales, es una estimación mientras no tengamos más datos de la temporada.
+      El número bajo cada jugador combina su tendencia de valor reciente y la dificultad de su próximo rival — no son puntos de fantasy reales, es una estimación mientras no tengamos más datos de la temporada. La <b>C</b> marca al capitán elegido (puntúa doble).
     </div>
   `;
 }
@@ -912,6 +942,7 @@ function openModal(playerId){
   document.getElementById("mpName").textContent = p.nickname;
   document.getElementById("mpTeam").textContent = p.teamAbbr + " · " + POSITIONS[p.positionId] + " · valor actual " + fmtEuro(p.marketValue);
   document.getElementById("mpRival").value = "";
+  buildManagerChips("mpRivalSlider", "mpRival", "");
   document.getElementById("mpDate").value = new Date().toISOString().slice(0,10);
   document.getElementById("mpClause").value = "";
   document.getElementById("overlay").classList.add("show");
@@ -958,6 +989,7 @@ function openEditModal(entryKey){
   document.getElementById("editInfo").textContent = `Manager actual: ${entry.rival} · Cláusula actual: ${entry.clausula ? fmtEuro(entry.clausula) : "sin registrar"}`;
   document.getElementById("raiseAmount").value = entry.clausula || "";
   document.getElementById("transferManager").value = "";
+  buildManagerChips("transferManagerSlider", "transferManager", "");
   document.getElementById("transferClause").value = "";
   document.getElementById("transferDate").value = new Date().toISOString().slice(0,10);
   setEditMode("raise");
