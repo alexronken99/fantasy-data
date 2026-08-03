@@ -393,6 +393,36 @@ function sortPlayers(list){
   return withTrend.map(x=>x.p);
 }
 
+let fixturesByTeam = {};
+
+async function loadFixtures(){
+  try{
+    fixturesByTeam = await fetchJsonWithFallback(`${DATA_REPO_BASE}/fixtures.json`);
+  }catch(e){
+    fixturesByTeam = {};
+  }
+}
+
+function nextFixtureFor(teamAbbr){
+  const list = fixturesByTeam[teamAbbr];
+  if(!list || list.length === 0) return null;
+  return list[0];
+}
+
+function difficultyLabel(d){
+  if(d == null) return {text:"—", cls:""};
+  const map = {1:["Muy baja","diff-pos"],2:["Baja","diff-pos"],3:["Media",""],4:["Alta","diff-neg"],5:["Muy alta","diff-neg"]};
+  return {text: (map[d] ? map[d][0] : "—"), cls: (map[d] ? map[d][1] : "")};
+}
+
+function learnedBidRatio(){
+  const withData = radarEntries.filter(e => e.clausula && e.valorAlFichar);
+  if(withData.length === 0) return null;
+  const ratios = withData.map(e => e.clausula / e.valorAlFichar);
+  const avg = ratios.reduce((a,b)=>a+b, 0) / ratios.length;
+  return {avg, count: withData.length};
+}
+
 function renderTable(){
   let list = players.filter(p => currentPos === "all" || p.positionId === currentPos);
   if(searchTerm){
@@ -400,19 +430,30 @@ function renderTable(){
     list = list.filter(p => p.nickname.toLowerCase().includes(s) || (p.teamAbbr||"").toLowerCase().includes(s));
   }
   list = sortPlayers(list);
-  document.getElementById("rowCount").textContent = list.length + " jugadores";
+  const ratio = learnedBidRatio();
+  document.getElementById("rowCount").textContent = list.length + " jugadores" + (ratio ? ` · puja sugerida basada en ${ratio.count} operación(es) de tu liga` : " · puja sugerida: registra cláusulas en Mercado para activarla");
 
-  let html = "<table><thead><tr><th>Jugador</th><th>Valor</th><th>Tendencia</th><th>Puntos</th><th>Media</th><th></th></tr></thead><tbody>";
+  let html = "<table><thead><tr><th>Jugador</th><th>Valor</th><th>Tendencia</th><th>Puntos</th><th>Media</th><th>Puja sugerida</th><th>Próx. rival</th><th></th></tr></thead><tbody>";
   list.slice(0, 300).forEach(p => {
     const t = trendFor(p);
     const arrow = t.dir === "up" ? "▲" : t.dir === "down" ? "▼" : "＝";
     const statusFlag = STATUS_LABEL[p.playerStatus] ? `<span class="status-flag status-${p.playerStatus}">${STATUS_LABEL[p.playerStatus]}</span>` : "";
+    const sugerida = ratio ? fmtEuro(Math.round(p.marketValue * ratio.avg)) : "—";
+    const nf = nextFixtureFor(p.teamAbbr);
+    let rivalCell = "—";
+    if(nf){
+      const dl = difficultyLabel(nf.dificultad);
+      const homeIcon = nf.local ? "🏠" : "✈️";
+      rivalCell = `${homeIcon} ${nf.rival} <span class="${dl.cls}">(${dl.text})</span>`;
+    }
     html += `<tr>
       <td><span class="pname">${p.nickname}</span><span class="pteam">${p.teamAbbr}</span>${statusFlag}</td>
       <td class="pval">${fmtEuro(p.marketValue)}</td>
       <td class="trend ${t.dir}">${arrow} ${t.diff !== 0 ? fmtEuro(Math.abs(t.diff)) : "sin datos previos"}</td>
       <td class="ppts">${p.points ?? "—"}</td>
       <td class="ppts">${p.averagePoints ? p.averagePoints.toFixed(2) : "—"}</td>
+      <td class="pval">${sugerida}</td>
+      <td class="ppts">${rivalCell}</td>
       <td><button class="track-btn" data-id="${p.id}">Marcar</button></td>
     </tr>`;
   });
@@ -575,7 +616,8 @@ function openModal(playerId){
       nombre: p.nickname,
       rival,
       fecha,
-      clausula: clausula ? Number(clausula) : null
+      clausula: clausula ? Number(clausula) : null,
+      valorAlFichar: p.marketValue
     });
     await saveRadar();
     document.getElementById("overlay").classList.remove("show");
@@ -594,6 +636,7 @@ async function init(){
   try{
     await fetchPlayers();
     await loadPrevSnapshot();
+    await loadFixtures();
     const snapDate = prevSnapshot.date ? `· histórico desde ${prevSnapshot.date}` : "· sin histórico previo todavía";
     document.getElementById("statusBox").innerHTML = `<b>${players.length}</b> jugadores · actualizado ${new Date().toLocaleTimeString("es-ES")} ${snapDate}`;
     render();
@@ -626,6 +669,7 @@ async function init(){
         });
         document.getElementById("statusBox").innerHTML = `<b>${players.length}</b> jugadores · cargado manualmente`;
         await loadPrevSnapshot();
+        await loadFixtures();
         render();
       }catch(e){
         alert("Ese texto no es un JSON válido. Copia el contenido completo de latest.json y vuelve a intentarlo.");
