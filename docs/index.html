@@ -185,6 +185,9 @@
     display:inline-block; background:var(--amber); color:#1a1a1a; font-weight:700; font-size:10px;
     border-radius:50%; width:16px; height:16px; line-height:16px; text-align:center; margin-left:4px;
   }
+  .mkt-starred{background:rgba(227,168,59,0.16) !important;}
+  .star-btn{background:none; border:none; cursor:pointer; font-size:18px; color:var(--chalk-dim); line-height:1;}
+  .star-btn.starred{color:var(--amber);}
 </style>
 </head>
 <body>
@@ -230,6 +233,7 @@
 <div class="view-full" id="viewMercado" style="display:none;">
   <div class="sub" style="margin-bottom:10px; color:var(--chalk-dim); font-size:13px;">Jugadores fichados (tuyos o de tus rivales) — valor, cláusula pagada y cuándo se liberan.</div>
   <div class="toolbar">
+    <input type="text" id="searchMkt" placeholder="Buscar jugador…" />
     <input type="text" class="combo" id="posFilterInputMkt" list="posOptions" placeholder="Posición…" />
     <input type="text" class="combo" id="teamFilterInputMkt" list="teamOptions" placeholder="Equipo…" />
     <input type="text" class="combo" id="managerFilterInput" list="managerOptions" placeholder="Manager…" />
@@ -421,7 +425,9 @@ function sortArrow(key, activeKey, dir){
   return dir === 1 ? " ▲" : " ▼";
 }
 let searchTerm = "";
+let searchTermMkt = "";
 let radarEntries = [];
+let starredPlayers = new Set();
 let currentView = "jugadores";
 
 function fmtEuro(n){
@@ -483,6 +489,29 @@ async function loadStorage(){
 
 async function saveRadar(){
   try{ localStorage.setItem("radar_entries", JSON.stringify(radarEntries)); }catch(e){}
+}
+
+async function loadStarred(){
+  try{
+    const arr = JSON.parse(localStorage.getItem("starred_players") || "[]");
+    starredPlayers = new Set(arr.map(String));
+  }catch(e){ starredPlayers = new Set(); }
+}
+
+function saveStarred(){
+  try{ localStorage.setItem("starred_players", JSON.stringify(Array.from(starredPlayers))); }catch(e){}
+}
+
+function isStarred(playerId){
+  return starredPlayers.has(String(playerId));
+}
+
+function toggleStar(playerId){
+  const key = String(playerId);
+  if(starredPlayers.has(key)) starredPlayers.delete(key);
+  else starredPlayers.add(key);
+  saveStarred();
+  renderMercadoView();
 }
 
 function checkClauseAlerts(){
@@ -599,7 +628,7 @@ function jugColumnValue(p, key, ratio){
   switch(key){
     case "name": return p.nickname.toLowerCase();
     case "team": return (p.teamAbbr||"").toLowerCase();
-    case "pos": return (POSITIONS[p.positionId]||"");
+    case "pos": return p.positionId;
     case "value": return p.marketValue;
     case "trend": return trendFor(p).diff;
     case "points": return p.points || 0;
@@ -723,16 +752,33 @@ function ringSVG(pct, color){
   <circle cx="28" cy="28" r="${r}" stroke="${color}" stroke-width="5" fill="none" stroke-dasharray="${c}" stroke-dashoffset="${offset}" stroke-linecap="round"/></svg>`;
 }
 
+function clausulazoScore(entry, player){
+  if(!entry.clausula || !player || !player.marketValue) return null;
+  const margenPct = ((entry.clausula - player.marketValue) / player.marketValue) * 100; // % de colchón que le queda a la cláusula
+  const t = trendFor(player);
+  const tendenciaPct = (t.diff / player.marketValue) * 100; // % de subida/bajada reciente respecto al valor
+  return tendenciaPct - margenPct; // colchón pequeño + tendencia al alza = objetivo prioritario
+}
+
+function clausulazoLabel(score){
+  if(score == null) return {text:"—", cls:""};
+  const cls = score >= 15 ? "diff-pos" : score <= -15 ? "diff-neg" : "";
+  const text = (score >= 0 ? "+" : "") + score.toFixed(0) + "%";
+  return {text, cls};
+}
+
 function mktColumnValue(e, player, key){
   switch(key){
     case "name": return (player ? player.nickname : e.nombre).toLowerCase();
     case "team": return (player ? player.teamAbbr : "").toLowerCase();
-    case "pos": return player ? (POSITIONS[player.positionId]||"") : "";
+    case "pos": return player ? player.positionId : 99;
     case "manager": return (e.rival||"").toLowerCase();
     case "value": return player ? player.marketValue : -Infinity;
     case "trend": return player ? trendFor(player).diff : 0;
     case "clausula": return e.clausula || 0;
     case "diff": return (player && e.clausula) ? e.clausula - player.marketValue : -Infinity;
+    case "reco": { const s = clausulazoScore(e, player); return s == null ? -Infinity : s; }
+    case "star": return isStarred(e.playerId) ? 1 : 0;
     case "libera": return mktMsRestantes(e);
     case "fichado": return new Date(e.fecha).getTime();
     default: return 0;
@@ -768,7 +814,9 @@ function renderMercadoView(){
   const box = document.getElementById("mercadoWrap");
   const filtered = radarEntries.filter(e => {
     const player = players.find(p => String(p.id) === String(e.playerId));
-    return matchesPos(player ? player.positionId : null) &&
+    const nameMatch = !searchTermMkt || (player ? player.nickname : e.nombre).toLowerCase().includes(searchTermMkt.toLowerCase());
+    return nameMatch &&
+           matchesPos(player ? player.positionId : null) &&
            matchesTeam(player ? player.teamAbbr : null) &&
            matchesManager(e.rival);
   });
@@ -777,8 +825,8 @@ function renderMercadoView(){
     return;
   }
   const mktCols = [
-    ["name","Jugador"], ["team","Equipo"], ["pos","Posición"], ["manager","Manager"], ["value","Valor actual"],
-    ["trend","Tendencia"], ["clausula","Cláusula pagada"], ["diff","Diferencia"], ["libera","Libera en"]
+    ["star",""], ["name","Jugador"], ["team","Equipo"], ["pos","Posición"], ["manager","Manager"], ["value","Valor actual"],
+    ["trend","Tendencia"], ["clausula","Cláusula pagada"], ["diff","Diferencia"], ["reco","Rentabilidad"], ["libera","Libera en"]
   ];
   let html = "<table><thead><tr>" + mktCols.map(([key,label]) =>
     `<th data-sort-key="${key}" data-table="mkt">${label}${sortArrow(key, mktSortKey, mktSortDir)}</th>`
@@ -786,7 +834,11 @@ function renderMercadoView(){
 
   sortMercadoEntries(filtered).forEach(({e, player}) => {
     const msRestantes = mktMsRestantes(e);
-    const rowClass = msRestantes <= 0 ? "" : msRestantes <= 72*3600000 ? "mkt-soon" : "";
+    const starred = isStarred(e.playerId);
+    const rowClass = [
+      starred ? "mkt-starred" : "",
+      msRestantes <= 0 ? "" : msRestantes <= 72*3600000 ? "mkt-soon" : ""
+    ].filter(Boolean).join(" ");
     const liberaLabel = liberaLabelFor(e);
     const valorActual = player ? player.marketValue : null;
     const t = player ? trendFor(player) : {diff:0, dir:"flat"};
@@ -794,8 +846,10 @@ function renderMercadoView(){
     const diff = (valorActual != null && e.clausula) ? e.clausula - valorActual : null;
     const diffClass = diff == null ? "" : diff >= 0 ? "diff-pos" : "diff-neg";
     const diffLabel = diff == null ? "—" : (diff >= 0 ? "+" : "") + fmtEuro(diff);
+    const reco = clausulazoLabel(clausulazoScore(e, player));
 
     html += `<tr class="${rowClass}">
+      <td><button class="star-btn${starred ? ' starred' : ''}" data-star-id="${e.playerId}" title="Marcar interés">${starred ? "★" : "☆"}</button></td>
       <td class="pname">${player ? player.nickname : e.nombre}</td>
       <td>${teamCrest(player ? player.teamAbbr : null)}</td>
       <td>${player ? posBadge(player.positionId) : "—"}</td>
@@ -804,6 +858,7 @@ function renderMercadoView(){
       <td class="trend ${t.dir}">${arrow} ${t.diff !== 0 ? fmtEuro(Math.abs(t.diff)) : "—"}</td>
       <td class="pval">${e.clausula ? fmtEuro(e.clausula) : "—"}</td>
       <td class="${diffClass}">${diffLabel}</td>
+      <td class="${reco.cls}" title="Colchón restante de la cláusula (cuanto menor, más cerca está de subir sola) combinado con la tendencia reciente del valor">${reco.text}</td>
       <td>${liberaLabel}<br><span class="ppts" style="font-size:11px;">fichado ${fechaLabelFor(e.fecha)}</span></td>
       <td>
         <button class="rm-btn" data-edit-key="${e.key}" title="Subir cláusula / transferir">✏️</button>
@@ -813,6 +868,9 @@ function renderMercadoView(){
   });
   html += "</tbody></table>";
   box.innerHTML = html;
+  document.querySelectorAll("#mercadoWrap .star-btn").forEach(btn => {
+    btn.onclick = () => toggleStar(btn.dataset.starId);
+  });
   document.querySelectorAll("#mercadoWrap .rm-btn[data-key]").forEach(btn => {
     btn.onclick = async () => {
       radarEntries = radarEntries.filter(e => e.key !== btn.dataset.key);
@@ -846,30 +904,36 @@ function renderEquiposView(){
   radarEntries.forEach(e => {
     const player = players.find(p => String(p.id) === String(e.playerId));
     const manager = e.rival || "Sin nombre";
-    if(!byManager[manager]) byManager[manager] = {manager, count:0, total:0, clausulaTotal:0};
+    if(!byManager[manager]) byManager[manager] = {manager, count:0, total:0, trendTotal:0, clausulaTotal:0};
     byManager[manager].count++;
-    if(player) byManager[manager].total += player.marketValue;
+    if(player){
+      byManager[manager].total += player.marketValue;
+      byManager[manager].trendTotal += trendFor(player).diff;
+    }
     if(e.clausula) byManager[manager].clausulaTotal += e.clausula;
   });
   let rows = Object.values(byManager);
   const key = equiposSortKey, dir = equiposSortDir;
   rows.sort((a,b) => {
-    const va = key === "manager" ? a.manager.toLowerCase() : (key === "count" ? a.count : key === "clausulaTotal" ? a.clausulaTotal : a.total);
-    const vb = key === "manager" ? b.manager.toLowerCase() : (key === "count" ? b.count : key === "clausulaTotal" ? b.clausulaTotal : b.total);
+    const va = key === "manager" ? a.manager.toLowerCase() : (key === "count" ? a.count : key === "clausulaTotal" ? a.clausulaTotal : key === "trendTotal" ? a.trendTotal : a.total);
+    const vb = key === "manager" ? b.manager.toLowerCase() : (key === "count" ? b.count : key === "clausulaTotal" ? b.clausulaTotal : key === "trendTotal" ? b.trendTotal : b.total);
     if(va < vb) return -1 * dir;
     if(va > vb) return 1 * dir;
     return 0;
   });
 
-  const eqCols = [["manager","Manager"], ["count","Jugadores"], ["total","Valor total"], ["clausulaTotal","Invertido en cláusulas"]];
+  const eqCols = [["manager","Manager"], ["count","Jugadores"], ["total","Valor total"], ["trendTotal","Tendencia"], ["clausulaTotal","Invertido en cláusulas"]];
   let html = "<table><thead><tr>" + eqCols.map(([k,label]) =>
     `<th data-sort-key="${k}">${label}${sortArrow(k, equiposSortKey, equiposSortDir)}</th>`
   ).join("") + "</tr></thead><tbody>";
   rows.forEach(r => {
+    const cls = r.trendTotal > 0 ? "up" : r.trendTotal < 0 ? "down" : "flat";
+    const arrow = r.trendTotal > 0 ? "▲" : r.trendTotal < 0 ? "▼" : "＝";
     html += `<tr>
       <td class="pname">${r.manager}</td>
       <td class="ppts">${r.count}</td>
       <td class="pval">${fmtEuro(r.total)}</td>
+      <td class="trend ${cls}">${arrow} ${r.trendTotal !== 0 ? fmtEuro(Math.abs(r.trendTotal)) : "—"}</td>
       <td class="pval">${r.clausulaTotal ? fmtEuro(r.clausulaTotal) : "—"}</td>
     </tr>`;
   });
@@ -1177,6 +1241,7 @@ document.getElementById("editSave").onclick = async () => {
 };
 
 document.getElementById("search").addEventListener("input", (e) => { searchTerm = e.target.value; renderTable(); });
+document.getElementById("searchMkt").addEventListener("input", (e) => { searchTermMkt = e.target.value; renderMercadoView(); });
 document.getElementById("posFilterInput").addEventListener("input", (e) => { posFilterText = e.target.value; renderTable(); });
 document.getElementById("teamFilterInput").addEventListener("input", (e) => { teamFilterText = e.target.value; renderTable(); });
 document.getElementById("posFilterInputMkt").addEventListener("input", (e) => { posFilterText = e.target.value; renderMercadoView(); });
@@ -1185,6 +1250,7 @@ document.getElementById("managerFilterInput").addEventListener("input", (e) => {
 
 async function init(){
   await loadStorage();
+  await loadStarred();
   checkClauseAlerts();
   try{
     await fetchPlayers();
