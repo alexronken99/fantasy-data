@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Sala de Mercado — LaLiga Fantasy</title>
-<link rel="icon" type="image/png" href="https://static.futbolfantasy.com/uploads/images/logos_competiciones/laliga2023.png">
+<title>LaLiga Fantasy</title>
+<link rel="icon" href="https://assets.laliga.com/assets/public/logos/favicon.ico">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Teko:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -492,6 +492,14 @@ function nowLocalDatetime(){
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+function msToLocalDatetimeInput(ms){
+  if(!ms) return "";
+  const d = new Date(Number(ms));
+  if(isNaN(d)) return "";
+  const pad = n => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 function todayAt1442(){
   const d = new Date();
   const pad = n => String(n).padStart(2, "0");
@@ -553,7 +561,8 @@ function syncSeguimiento(action, entry){
         manager: entry.rival,
         fecha: new Date(entry.fecha).getTime(),
         playerId: entry.playerId,
-        clausula: entry.clausula
+        clausula: entry.clausula,
+        valorAlFichar: entry.valorAlFichar
       })
     });
   }catch(e){ /* fallo silencioso: no debe romper el uso normal del dashboard */ }
@@ -584,7 +593,8 @@ async function resyncAllSeguimiento(){
           manager: entry.rival,
           fecha: new Date(entry.fecha).getTime(),
           playerId: entry.playerId,
-          clausula: entry.clausula
+          clausula: entry.clausula,
+          valorAlFichar: entry.valorAlFichar
         }))
       })
     });
@@ -593,8 +603,22 @@ async function resyncAllSeguimiento(){
 
 async function loadStorage(){
   try{
-    radarEntries = JSON.parse(localStorage.getItem("radar_entries") || "[]");
-  }catch(e){ radarEntries = []; }
+    const bridgeData = await fetchJsonWithFallback(SEGUIMIENTO_BRIDGE_URL);
+    radarEntries = bridgeData.map(e => ({
+      key: e.key,
+      playerId: e.playerId,
+      nombre: e.jugador,
+      rival: e.manager,
+      fecha: Number(e.fecha),
+      clausula: e.clausula != null && e.clausula !== "" ? Number(e.clausula) : null,
+      valorAlFichar: e.valorAlFichar != null && e.valorAlFichar !== "" ? Number(e.valorAlFichar) : null
+    }));
+    await saveRadar(); // refresca la copia local con lo último del puente
+  }catch(e){
+    try{
+      radarEntries = JSON.parse(localStorage.getItem("radar_entries") || "[]");
+    }catch(e2){ radarEntries = []; }
+  }
 }
 
 async function saveRadar(){
@@ -1326,7 +1350,7 @@ function openConflictModal(existingEntry, player){
   document.getElementById("conflictInfo").innerHTML =
     `Ya está en Mercado con <b>${existingEntry.rival}</b> · Cláusula actual: ${existingEntry.clausula ? fmtEuro(existingEntry.clausula) : "sin registrar"} · Libera en: ${liberaLabelFor(existingEntry)}`;
   document.getElementById("conflictClause").value = toMillionsInput(existingEntry.clausula);
-  document.getElementById("conflictDate").value = existingEntry.fecha || nowLocalDatetime();
+  document.getElementById("conflictDate").value = existingEntry.fecha ? msToLocalDatetimeInput(existingEntry.fecha) : nowLocalDatetime();
   document.getElementById("conflictOverlay").classList.add("show");
 }
 
