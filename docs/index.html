@@ -194,6 +194,16 @@
     display:inline-block; background:var(--amber); color:#1a1a1a; font-weight:700; font-size:10px;
     border-radius:50%; width:16px; height:16px; line-height:16px; text-align:center; margin-left:4px;
   }
+  .once-layout{display:flex; gap:28px; align-items:flex-start;}
+  .once-left{flex:1 1 50%; min-width:0;}
+  .once-right{flex:1 1 50%; min-width:0;}
+  .once-right h3{font-family:'Teko',sans-serif; font-size:20px; text-transform:uppercase; color:var(--turf); margin:18px 0 8px;}
+  .once-right h3:first-child{margin-top:0;}
+  .once-right table{font-size:13px;}
+  .once-right td{padding:6px 8px;}
+  @media (max-width: 900px){
+    .once-layout{flex-direction:column;}
+  }
   .mkt-starred{background:rgba(227,168,59,0.16) !important;}
   .star-btn{background:none; border:none; cursor:pointer; font-size:18px; color:var(--chalk-dim); line-height:1;}
   .star-btn.starred{color:var(--amber);}
@@ -1177,6 +1187,43 @@ function onceCard(p, captain){
   </div>`;
 }
 
+function myTeamListHtml(){
+  const myPlayers = radarEntries
+    .filter(e => e.rival === MY_MANAGER)
+    .map(e => players.find(p => String(p.id) === String(e.playerId)))
+    .filter(Boolean);
+
+  if(myPlayers.length === 0) return "";
+
+  const byPos = {1:[], 2:[], 3:[], 4:[], 5:[]};
+  myPlayers.forEach(p => { if(byPos[p.positionId]) byPos[p.positionId].push(p); });
+  Object.keys(byPos).forEach(k => byPos[k].sort((a,b) => playerOnceScore(b) - playerOnceScore(a)));
+
+  let html = "";
+  [1,2,3,4,5].forEach(posId => {
+    const list = byPos[posId];
+    if(!list || list.length === 0) return;
+    html += `<h3>${POSITIONS[posId]}</h3><table><tbody>`;
+    list.forEach(p => {
+      const nf = nextFixtureFor(p.teamAbbr);
+      let rivalCell = "—";
+      if(nf){
+        const dl = difficultyLabel(nf.dificultad);
+        const homeIcon = nf.local ? "🏠" : "✈️";
+        rivalCell = `${homeIcon} ${teamCrest(nf.rival)} <span class="${dl.cls}">(${dl.text})</span>`;
+      }
+      html += `<tr>
+        <td class="pname">${p.nickname}</td>
+        <td>${teamCrest(p.teamAbbr)}</td>
+        <td>${startProbLabel(p.startProb)}</td>
+        <td class="ppts">${rivalCell}</td>
+      </tr>`;
+    });
+    html += "</tbody></table>";
+  });
+  return html;
+}
+
 function renderOnceView(){
   const box = document.getElementById("onceWrap");
   const result = computeRecommendedOnce();
@@ -1210,17 +1257,24 @@ function renderOnceView(){
     : "";
 
   box.innerHTML = `
-    <div class="formation-label">Formación sugerida: ${label}</div>
-    <div class="pitch">
-      <div class="pitch-row">${result.fwds.map(p => onceCard(p, result.captain)).join("")}</div>
-      <div class="pitch-row">${result.mids.map(p => onceCard(p, result.captain)).join("")}</div>
-      <div class="pitch-row">${result.defs.map(p => onceCard(p, result.captain)).join("")}</div>
-      <div class="pitch-row">${onceCard(result.gk, result.captain)}</div>
-    </div>
-    ${benchHtml}
-    ${managerHtml}
-    <div class="sub" style="margin-top:14px; color:var(--chalk-dim); font-size:12px;">
-      El número bajo cada jugador combina su tendencia de valor reciente, la dificultad de su próximo rival y su probabilidad de ser titular — no son puntos de fantasy reales, es una estimación mientras no tengamos más datos de la temporada. La <b>C</b> marca al capitán elegido (puntúa doble). Si un titular no juega ni un minuto, su suplente de la misma línea puntuaría en su lugar; si es el capitán quien no juega, su suplente puntúa por él pero sin el x2.
+    <div class="once-layout">
+      <div class="once-left">
+        <div class="formation-label">Formación sugerida: ${label}</div>
+        <div class="pitch">
+          <div class="pitch-row">${result.fwds.map(p => onceCard(p, result.captain)).join("")}</div>
+          <div class="pitch-row">${result.mids.map(p => onceCard(p, result.captain)).join("")}</div>
+          <div class="pitch-row">${result.defs.map(p => onceCard(p, result.captain)).join("")}</div>
+          <div class="pitch-row">${onceCard(result.gk, result.captain)}</div>
+        </div>
+        ${benchHtml}
+        ${managerHtml}
+        <div class="sub" style="margin-top:14px; color:var(--chalk-dim); font-size:12px;">
+          El número bajo cada jugador combina su tendencia de valor reciente, la dificultad de su próximo rival y su probabilidad de ser titular — no son puntos de fantasy reales, es una estimación mientras no tengamos más datos de la temporada. La <b>C</b> marca al capitán elegido (puntúa doble). Si un titular no juega ni un minuto, su suplente de la misma línea puntuaría en su lugar; si es el capitán quien no juega, su suplente puntúa por él pero sin el x2.
+        </div>
+      </div>
+      <div class="once-right">
+        ${myTeamListHtml()}
+      </div>
     </div>
   `;
 }
