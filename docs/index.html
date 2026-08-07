@@ -401,8 +401,8 @@ const MANAGER_COLORS = {
   "iulianrusu97": {bg:"#8B5CF6", fg:"#ffffff"}
 };
 
-const TEAM_CREST_ID = {"ATH":1,"ATM":2,"BAR":3,"BET":4,"CEL":5,"DEP":6,"ESP":7,"GET":8,"LEV":10,"MAL":11,"OSA":13,"RAY":14,"RMA":15,"RSO":16,"SEV":17,"VAL":18,"ELC":21,"VIL":22,"ALA":28,"RAC":42};
-const TEAM_NAME_TO_CREST_ID = {"Alavés":28,"Athletic":1,"Atlético":2,"Barcelona":3,"Betis":4,"Celta":5,"Deportivo":6,"Elche":21,"Espanyol":7,"Getafe":8,"Levante":10,"Málaga":11,"Osasuna":13,"Racing":42,"Rayo":14,"Real Madrid":15,"Real Sociedad":16,"Sevilla":17,"Valencia":18,"Villarreal":22};
+const TEAM_CREST_ID = {"BAR":529,"RMA":541,"VIL":533,"ATM":530,"BET":543,"CEL":538,"GET":546,"RAY":728,"VAL":532,"RSO":548,"ESP":540,"ATH":531,"SEV":536,"ALA":542,"ELC":797,"LEV":539,"OSA":727,"RAC":4665,"DEP":544,"MAL":535};
+const TEAM_NAME_TO_CREST_ID = {"Barcelona":529,"Real Madrid":541,"Villarreal":533,"Atlético":530,"Atletico Madrid":530,"Real Betis":543,"Betis":543,"Celta":538,"Getafe":546,"Rayo":728,"Rayo Vallecano":728,"Valencia":532,"Real Sociedad":548,"Espanyol":540,"Athletic":531,"Athletic Club":531,"Sevilla":536,"Alavés":542,"Elche":797,"Levante":539,"Osasuna":727,"Racing":4665,"Racing Santander":4665,"Deportivo":544,"Deportivo La Coruna":544,"Málaga":535,"Malaga":535};
 
 const MANAGER_LIST = Object.keys(MANAGER_COLORS);
 
@@ -426,7 +426,7 @@ function teamCrest(teamAbbr){
   if(!teamAbbr) return `<span class="pteam">—</span>`;
   const id = TEAM_CREST_ID[teamAbbr] || TEAM_NAME_TO_CREST_ID[teamAbbr];
   if(!id) return `<span class="pteam">${teamAbbr}</span>`;
-  return `<img src="https://static.futbolfantasy.com/uploads/images/equipos/escudom/${id}.png" alt="${teamAbbr}" title="${teamAbbr}" class="team-crest" onerror="this.outerHTML='&lt;span class=&quot;pteam&quot;&gt;${teamAbbr}&lt;/span&gt;'">`;
+  return `<img src="https://assets.analiticafantasy.com/equipos/${id}.png" alt="${teamAbbr}" title="${teamAbbr}" class="team-crest" onerror="this.outerHTML='&lt;span class=&quot;pteam&quot;&gt;${teamAbbr}&lt;/span&gt;'">`;
 }
 
 function posBadge(positionId){
@@ -755,7 +755,7 @@ async function fetchPlayers(){
       startProb: entry.probabilidad != null ? Number(entry.probabilidad) : null,
       points: null,
       averagePoints: null,
-      playerStatus: null
+      playerStatus: entry.estado || null
     };
   });
 }
@@ -917,7 +917,7 @@ function clausulazoScore(entry, player){
 
 function clausulazoLabel(score){
   if(score == null) return {text:"—", cls:""};
-  const cls = score >= 15 ? "diff-pos" : score <= -15 ? "diff-neg" : "";
+  const cls = score >= 0 ? "diff-pos" : "diff-neg";
   const text = (score >= 0 ? "+" : "") + score.toFixed(0) + "%";
   return {text, cls};
 }
@@ -1454,7 +1454,7 @@ async function init(){
             startProb: entry.probabilidad != null ? Number(entry.probabilidad) : null,
             points: null,
             averagePoints: null,
-            playerStatus: null
+            playerStatus: entry.estado || null
           };
         });
         document.getElementById("statusBox").innerHTML = `<b>${players.length}</b> jugadores · cargado manualmente`;
