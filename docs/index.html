@@ -207,6 +207,7 @@
   .mkt-starred{background:rgba(227,168,59,0.16) !important;}
   .star-btn{background:none; border:none; cursor:pointer; font-size:18px; color:var(--chalk-dim); line-height:1;}
   .star-btn.starred{color:var(--amber);}
+  .player-cards{display:none;}
 
   /* ================= RESPONSIVE (móvil) ================= */
   @media (max-width: 640px){
@@ -226,14 +227,25 @@
     .toolbar input[type=text]{min-width:0; flex:1 1 100%; font-size:13px; padding:9px 10px;}
     .combo{min-width:0; flex:1 1 auto; font-size:13px; padding:9px 10px;}
 
-    #tableWrap, #mercadoWrap, #equiposWrap{
-      overflow-x:auto;
-      -webkit-overflow-scrolling:touch;
+    #tableWrap table, #mercadoWrap table{display:none;}
+    #equiposWrap{overflow-x:auto; -webkit-overflow-scrolling:touch;}
+    #equiposWrap table{min-width:640px; font-size:12px;}
+
+    .player-cards{display:flex; flex-direction:column; gap:8px;}
+    .player-card{
+      background:var(--panel); border:1px solid var(--pitch-line); border-radius:10px;
+      padding:10px 12px; font-size:13px;
     }
-    #tableWrap table, #mercadoWrap table, #equiposWrap table{
-      min-width:640px; /* fuerza scroll horizontal en vez de aplastar columnas */
-      font-size:12px;
-    }
+    .player-card.mkt-starred{background:rgba(227,168,59,0.16);}
+    .player-card .pc-top{display:flex; align-items:center; justify-content:space-between; gap:8px;}
+    .player-card .pc-name-wrap{display:flex; align-items:center; gap:6px; min-width:0;}
+    .player-card .pc-name{font-weight:600; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+    .player-card .pc-actions{display:flex; gap:6px; flex:none;}
+    .player-card .pc-actions button{font-size:16px; padding:4px 8px; background:var(--pitch-deep); border:1px solid var(--pitch-line); border-radius:6px; color:var(--chalk-dim);}
+    .player-card .pc-grid{display:grid; grid-template-columns:1fr 1fr; gap:4px 10px; margin-top:8px; font-size:12px;}
+    .player-card .pc-grid .pc-label{color:var(--chalk-dim); font-size:10px; text-transform:uppercase; letter-spacing:0.03em;}
+    .player-card .track-btn{width:100%; margin-top:8px; padding:8px;}
+
     thead th{font-size:13px; padding:6px 8px;}
     td{padding:7px 8px;}
 
@@ -849,6 +861,7 @@ function renderTable(){
   let html = "<table><thead><tr>" + cols.map(([key,label]) =>
     `<th data-sort-key="${key}" data-table="jug">${label}${sortArrow(key, jugSortKey, jugSortDir)}</th>`
   ).join("") + "<th></th></tr></thead><tbody>";
+  let cardsHtml = "";
   list.slice(0, 300).forEach(p => {
     const t = trendFor(p);
     const arrow = t.dir === "up" ? "▲" : t.dir === "down" ? "▼" : "＝";
@@ -874,9 +887,23 @@ function renderTable(){
       <td class="ppts">${rivalCell}</td>
       <td><button class="track-btn" data-id="${p.id}">Marcar</button></td>
     </tr>`;
+
+    cardsHtml += `<div class="player-card">
+      <div class="pc-top">
+        <div class="pc-name-wrap">${teamCrest(p.teamAbbr)}<span class="pc-name">${p.nickname}</span>${statusFlag}</div>
+        ${posBadge(p.positionId)}
+      </div>
+      <div class="pc-grid">
+        <div><span class="pc-label">Valor</span><br>${fmtEuro(p.marketValue)}</div>
+        <div><span class="pc-label">Tendencia</span><br><span class="trend ${t.dir}">${arrow} ${t.diff !== 0 ? fmtEuro(Math.abs(t.diff)) : "—"}</span></div>
+        <div><span class="pc-label">Titular</span><br>${startProbLabel(p.startProb)}</div>
+        <div><span class="pc-label">Próx. rival</span><br>${rivalCell}</div>
+      </div>
+      <button class="track-btn" data-id="${p.id}">Marcar</button>
+    </div>`;
   });
   html += "</tbody></table>";
-  document.getElementById("tableWrap").innerHTML = html;
+  document.getElementById("tableWrap").innerHTML = html + `<div class="player-cards">${cardsHtml}</div>`;
 
   document.querySelectorAll(".track-btn").forEach(btn => {
     btn.onclick = () => openModal(btn.dataset.id);
@@ -998,6 +1025,7 @@ function renderMercadoView(){
   let html = "<table><thead><tr>" + mktCols.map(([key,label]) =>
     `<th data-sort-key="${key}" data-table="mkt">${label}${sortArrow(key, mktSortKey, mktSortDir)}</th>`
   ).join("") + "<th></th></tr></thead><tbody>";
+  let cardsHtml = "";
 
   sortMercadoEntries(filtered).forEach(({e, player}) => {
     const msRestantes = mktMsRestantes(e);
@@ -1014,10 +1042,11 @@ function renderMercadoView(){
     const diffClass = diff == null ? "" : diff >= 0 ? "diff-pos" : "diff-neg";
     const diffLabel = diff == null ? "—" : (diff >= 0 ? "+" : "") + fmtEuro(diff);
     const reco = clausulazoLabel(clausulazoScore(e, player));
+    const playerName = player ? player.nickname : e.nombre;
 
     html += `<tr class="${rowClass}">
       <td><button class="star-btn${starred ? ' starred' : ''}" data-star-id="${e.playerId}" title="Marcar interés">${starred ? "★" : "☆"}</button></td>
-      <td class="pname">${player ? player.nickname : e.nombre}</td>
+      <td class="pname">${playerName}</td>
       <td>${teamCrest(player ? player.teamAbbr : null)}</td>
       <td>${player ? posBadge(player.positionId) : "—"}</td>
       <td>${managerBadge(e.rival)}</td>
@@ -1032,9 +1061,32 @@ function renderMercadoView(){
         <button class="rm-btn" data-key="${e.key}" title="Dejar de seguir">✕</button>
       </td>
     </tr>`;
+
+    cardsHtml += `<div class="player-card${starred ? ' mkt-starred' : ''}">
+      <div class="pc-top">
+        <div class="pc-name-wrap">
+          <button class="star-btn${starred ? ' starred' : ''}" data-star-id="${e.playerId}" title="Marcar interés">${starred ? "★" : "☆"}</button>
+          ${teamCrest(player ? player.teamAbbr : null)}
+          <span class="pc-name">${playerName}</span>
+        </div>
+        <div class="pc-actions">
+          <button class="rm-btn" data-edit-key="${e.key}" title="Subir cláusula / transferir">✏️</button>
+          <button class="rm-btn" data-key="${e.key}" title="Dejar de seguir">✕</button>
+        </div>
+      </div>
+      <div class="pc-grid">
+        <div><span class="pc-label">Manager</span><br>${managerBadge(e.rival)}</div>
+        <div><span class="pc-label">Valor actual</span><br>${valorActual != null ? fmtEuro(valorActual) : "—"}</div>
+        <div><span class="pc-label">Cláusula</span><br>${e.clausula ? fmtEuro(e.clausula) : "—"}</div>
+        <div><span class="pc-label">Diferencia</span><br><span class="${diffClass}">${diffLabel}</span></div>
+        <div><span class="pc-label">Rentabilidad</span><br><span class="${reco.cls}">${reco.text}</span></div>
+        <div><span class="pc-label">Libera en</span><br>${liberaLabel}</div>
+      </div>
+      <div class="pc-label" style="margin-top:6px;">fichado ${fechaLabelFor(e.fecha)}</div>
+    </div>`;
   });
   html += "</tbody></table>";
-  box.innerHTML = html;
+  box.innerHTML = html + `<div class="player-cards">${cardsHtml}</div>`;
   document.querySelectorAll("#mercadoWrap .star-btn").forEach(btn => {
     btn.onclick = () => toggleStar(btn.dataset.starId);
   });
