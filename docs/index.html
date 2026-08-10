@@ -795,7 +795,7 @@ async function fetchPlayers(){
   });
 }
 
-function jugColumnValue(p, key, ratio){
+function jugColumnValue(p, key){
   switch(key){
     case "name": return p.nickname.toLowerCase();
     case "team": return (p.teamAbbr||"").toLowerCase();
@@ -804,17 +804,17 @@ function jugColumnValue(p, key, ratio){
     case "trend": return trendFor(p).diff;
     case "points": return p.points || 0;
     case "avg": return p.averagePoints || 0;
-    case "sugerida": return ratio ? p.marketValue * ratio.avg : 0;
+    case "sugerida": { const s = suggestedBid(p); return s != null ? s : 0; }
     case "titular": return p.startProb != null ? p.startProb : -1;
     case "rival": { const nf = nextFixtureFor(p.teamAbbr); return nf ? (nf.dificultad||0) : -1; }
     default: return 0;
   }
 }
 
-function sortPlayers(list, ratio){
+function sortPlayers(list){
   const key = jugSortKey, dir = jugSortDir;
   return list.slice().sort((a,b) => {
-    const va = jugColumnValue(a, key, ratio), vb = jugColumnValue(b, key, ratio);
+    const va = jugColumnValue(a, key), vb = jugColumnValue(b, key);
     if(va < vb) return -1 * dir;
     if(va > vb) return 1 * dir;
     return 0;
@@ -863,9 +863,8 @@ function renderTable(){
     const s = searchTerm.toLowerCase();
     list = list.filter(p => p.nickname.toLowerCase().includes(s));
   }
-  const ratio = learnedBidRatio();
-  list = sortPlayers(list, ratio);
-  document.getElementById("rowCount").textContent = list.length + " jugadores" + (ratio ? ` · puja sugerida basada en ${ratio.count} operación(es) de tu liga` : " · puja sugerida: registra cláusulas en Mercado para activarla");
+  list = sortPlayers(list);
+  document.getElementById("rowCount").textContent = list.length + " jugadores · puja sugerida: proyección a 10 días según la tendencia reciente";
 
   const cols = [
     ["name","Jugador"], ["team","Equipo"], ["pos","Posición"], ["value","Valor"], ["trend","Tendencia"],
@@ -879,7 +878,8 @@ function renderTable(){
     const t = trendFor(p);
     const arrow = t.dir === "up" ? "▲" : t.dir === "down" ? "▼" : "＝";
     const statusFlag = STATUS_LABEL[p.playerStatus] ? `<span class="status-flag status-${p.playerStatus}">${STATUS_LABEL[p.playerStatus]}</span>` : "";
-    const sugerida = ratio ? fmtEuro(Math.round(p.marketValue * ratio.avg)) : "—";
+    const sugeridaVal = suggestedBid(p);
+    const sugerida = sugeridaVal != null ? fmtEuro(Math.round(sugeridaVal)) : "—";
     const nf = nextFixtureFor(p.teamAbbr);
     let rivalCell = "—";
     if(nf){
@@ -951,18 +951,40 @@ async function loadHistory(){
 function weeklyTrend(p){
   const hist = historyByPlayer[p.id];
   if(!hist || hist.length < 2) return trendFor(p).diff; // sin historial suficiente, usamos el de un día
+
   const deltas = [];
   for(let i = 1; i < hist.length; i++){
     deltas.push(hist[i].value - hist[i-1].value);
   }
-  return deltas.reduce((a,b)=>a+b, 0) / deltas.length;
+  if(deltas.length < 2) return deltas[0];
+
+  // Aceleración: cuánto cambia el propio cambio diario de un día a otro.
+  // Detecta que una tendencia se está frenando (o girando del todo) mucho
+  // antes que mirar solo los deltas en crudo, aunque el último delta siga
+  // teniendo el signo contrario.
+  const accelerations = [];
+  for(let i = 1; i < deltas.length; i++){
+    accelerations.push(deltas[i] - deltas[i-1]);
+  }
+  const avgAcceleration = accelerations.reduce((a,b)=>a+b, 0) / accelerations.length;
+  const lastDelta = deltas[deltas.length - 1];
+
+  // Proyección del delta de mañana: el de hoy + la aceleración media reciente.
+  return lastDelta + avgAcceleration;
+}
+
+function suggestedBid(p){
+  if(!p || !p.marketValue) return null;
+  const tendenciaManana = weeklyTrend(p);
+  const proyeccion10dias = p.marketValue + (tendenciaManana * 10);
+  return Math.max(p.marketValue, proyeccion10dias); // nunca sugerir menos que el valor de hoy
 }
 
 function clausulazoScore(entry, player){
   if(!entry.clausula || !player || !player.marketValue) return null;
   const tendenciaDiaria = weeklyTrend(player);
-  const proyeccion14dias = player.marketValue + (tendenciaDiaria * 14); // si la media de los últimos días se mantiene
-  return ((proyeccion14dias - entry.clausula) / entry.clausula) * 100;
+  const proyeccion10dias = player.marketValue + (tendenciaDiaria * 10); // si la tendencia se mantiene
+  return ((proyeccion10dias - entry.clausula) / entry.clausula) * 100;
 }
 
 function clausulazoLabel(score){
