@@ -227,9 +227,21 @@
     .toolbar input[type=text]{min-width:0; flex:1 1 100%; font-size:16px; padding:9px 10px;}
     .combo{min-width:0; flex:1 1 auto; font-size:16px; padding:9px 10px;}
 
-    #tableWrap table, #mercadoWrap table{display:none;}
-    #equiposWrap{overflow-x:auto; -webkit-overflow-scrolling:touch;}
-    #equiposWrap table{min-width:640px; font-size:12px;}
+    #tableWrap table, #mercadoWrap table, #equiposWrap table{display:none;}
+
+    .sort-buttons{display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px;}
+    .sort-buttons button{
+      background:var(--panel); border:1px solid var(--pitch-line); color:var(--chalk-dim);
+      border-radius:8px; padding:7px 12px; font-size:12px; font-family:'Inter',sans-serif; cursor:pointer;
+    }
+    .sort-buttons button.active{background:var(--turf-dim); color:var(--pitch-deep); border-color:var(--turf); font-weight:700;}
+
+    .team-card{
+      background:var(--panel); border:1px solid var(--pitch-line); border-radius:10px;
+      padding:10px 12px; margin-bottom:8px; font-size:13px;
+    }
+    .team-card .tc-top{margin-bottom:8px;}
+    .team-card .pc-grid{display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px 10px;}
 
     .player-cards{display:flex; flex-direction:column; gap:8px;}
     .player-card{
@@ -1159,7 +1171,36 @@ function renderEquiposView(){
     </tr>`;
   });
   html += "</tbody></table>";
-  box.innerHTML = html;
+
+  const sortButtonsHtml = `<div class="sort-buttons">${eqCols.map(([k,label]) =>
+    `<button data-sort-key="${k}" class="${equiposSortKey === k ? 'active' : ''}">${label}${sortArrow(k, equiposSortKey, equiposSortDir)}</button>`
+  ).join("")}</div>`;
+
+  let cardsHtml = "";
+  rows.forEach(r => {
+    const cls = r.trendTotal > 0 ? "up" : r.trendTotal < 0 ? "down" : "flat";
+    const arrow = r.trendTotal > 0 ? "▲" : r.trendTotal < 0 ? "▼" : "＝";
+    cardsHtml += `<div class="team-card">
+      <div class="tc-top">${managerBadge(r.manager)}</div>
+      <div class="pc-grid">
+        <div><span class="pc-label">Jugadores</span><br>${r.count}</div>
+        <div><span class="pc-label">Valor total</span><br>${fmtEuro(r.total)}</div>
+        <div><span class="pc-label">Invertido</span><br>${r.clausulaTotal ? fmtEuro(r.clausulaTotal) : "—"}</div>
+        <div><span class="pc-label">Tendencia</span><br><span class="trend ${cls}">${arrow} ${r.trendTotal !== 0 ? fmtEuro(Math.abs(r.trendTotal)) : "—"}</span></div>
+      </div>
+    </div>`;
+  });
+
+  box.innerHTML = html + `<div class="player-cards">${sortButtonsHtml}${cardsHtml}</div>`;
+
+  document.querySelectorAll('#equiposWrap .sort-buttons button').forEach(btn => {
+    btn.onclick = () => {
+      const k = btn.dataset.sortKey;
+      if(equiposSortKey === k){ equiposSortDir = equiposSortDir === 1 ? -1 : 1; }
+      else { equiposSortKey = k; equiposSortDir = 1; }
+      renderEquiposView();
+    };
+  });
 
   document.querySelectorAll('#equiposWrap th[data-sort-key]').forEach(th => {
     th.onclick = () => {
@@ -1265,7 +1306,10 @@ function myTeamListHtml(){
       if(nf){
         const dl = difficultyLabel(nf.dificultad);
         const homeIcon = nf.local ? "🏠" : "✈️";
-        rivalCell = `${homeIcon} ${teamCrest(nf.rival)} <span class="${dl.cls}">(${dl.text})</span>`;
+        rivalCell = `<div style="display:flex; flex-direction:column; align-items:center; gap:2px;">
+          <span>${homeIcon} ${teamCrest(nf.rival)}</span>
+          <span class="${dl.cls}" style="font-size:10px; white-space:nowrap;">(${dl.text})</span>
+        </div>`;
       }
       html += `<tr>
         <td class="pname">${p.nickname}</td>
