@@ -1050,6 +1050,8 @@ function sortMercadoEntries(filtered){
       const groupA = da <= 0 ? 0 : 1, groupB = db <= 0 ? 0 : 1;
       if(groupA !== groupB) return groupA - groupB;
       if(groupA === 0){
+        const ca = a.e.confirmado ? 1 : 0, cb = b.e.confirmado ? 1 : 0;
+        if(ca !== cb) return ca - cb; // "Por confirmar" (0) antes que "Libre" (1)
         const ta = a.player ? trendFor(a.player).diff : 0, tb = b.player ? trendFor(b.player).diff : 0;
         return tb - ta;
       }
