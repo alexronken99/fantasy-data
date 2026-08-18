@@ -602,9 +602,9 @@ const DATA_REPO_BASE = "https://raw.githubusercontent.com/alexronken99/fantasy-d
 
 const SEGUIMIENTO_BRIDGE_URL = "https://script.google.com/macros/s/AKfycbw5ZwDQxxavcur3oIEfI-ZJK_DxpfH88McuGuhvu0GoBnXWyGEQB6nNK_PJkUeoxI0/exec";
 
-function syncSeguimiento(action, entry){
+async function syncSeguimiento(action, entry){
   try{
-    fetch(SEGUIMIENTO_BRIDGE_URL, {
+    await fetch(SEGUIMIENTO_BRIDGE_URL, {
       method: "POST",
       mode: "no-cors",
       headers: {"Content-Type": "text/plain;charset=utf-8"},
@@ -708,14 +708,21 @@ function toggleStar(playerId){
   renderMercadoView();
 }
 
+const syncingKeys = new Set();
+
 async function confirmSinCambios(key){
-  const entry = radarEntries.find(e => e.key === key);
-  if(!entry) return;
-  entry.confirmado = true;
-  syncSeguimiento("remove", {key: entry.key});
-  syncSeguimiento("add", entry);
-  await saveRadar();
-  renderMercadoView();
+  if(syncingKeys.has(key)) return; // ya se está procesando, ignora el clic repetido
+  syncingKeys.add(key);
+  try{
+    const entry = radarEntries.find(e => e.key === key);
+    if(!entry) return;
+    entry.confirmado = true;
+    await syncSeguimiento("update", entry);
+    await saveRadar();
+    renderMercadoView();
+  } finally {
+    syncingKeys.delete(key);
+  }
 }
 
 function checkClauseAlerts(){
@@ -1144,10 +1151,17 @@ function renderMercadoView(){
   });
   document.querySelectorAll("#mercadoWrap .rm-btn[data-key]").forEach(btn => {
     btn.onclick = async () => {
-      syncSeguimiento("remove", {key: btn.dataset.key});
-      radarEntries = radarEntries.filter(e => e.key !== btn.dataset.key);
-      await saveRadar();
-      renderMercadoView();
+      const k = btn.dataset.key;
+      if(syncingKeys.has(k)) return;
+      syncingKeys.add(k);
+      try{
+        await syncSeguimiento("remove", {key: k});
+        radarEntries = radarEntries.filter(e => e.key !== k);
+        await saveRadar();
+        renderMercadoView();
+      } finally {
+        syncingKeys.delete(k);
+      }
     };
   });
   document.querySelectorAll("#mercadoWrap .rm-btn[data-edit-key]").forEach(btn => {
@@ -1564,10 +1578,9 @@ document.getElementById("conflictOverlay").onclick = (e) => { if(e.target.id ===
 document.getElementById("conflictSave").onclick = async () => {
   const entry = radarEntries.find(e => e.key === conflictKey);
   if(!entry) return;
-  syncSeguimiento("remove", {key: entry.key});
   entry.clausula = parseEuroInput(document.getElementById("conflictClause").value);
   entry.fecha = document.getElementById("conflictDate").value;
-  syncSeguimiento("add", entry);
+  await syncSeguimiento("update", entry);
   await saveRadar();
   document.getElementById("conflictOverlay").classList.remove("show");
   render();
@@ -1585,34 +1598,31 @@ document.getElementById("editSave").onclick = async () => {
     if(!amount) return;
     entry.clausula = amount;
     entry.confirmado = true;
-    syncSeguimiento("remove", {key: entry.key});
-    syncSeguimiento("add", entry);
+    await syncSeguimiento("update", entry);
   } else if(editMode === "transfer"){
     const manager = document.getElementById("transferManager").value.trim();
     const clauseVal = parseEuroInput(document.getElementById("transferClause").value);
     const date = document.getElementById("transferDate").value;
     if(!manager || !date) return;
     const player = players.find(p => String(p.id) === String(entry.playerId));
-    syncSeguimiento("remove", {key: entry.key});
     entry.rival = manager;
     entry.clausula = clauseVal;
     entry.fecha = date;
     entry.valorAlFichar = player ? player.marketValue : entry.valorAlFichar;
     entry.confirmado = false; // empieza un ciclo de protección nuevo
     entry.proteccionMs = PROTECCION_NORMAL_MS;
-    syncSeguimiento("add", entry);
+    await syncSeguimiento("update", entry);
   } else if(editMode === "sell"){
-    syncSeguimiento("remove", {key: editEntryKey});
+    await syncSeguimiento("remove", {key: editEntryKey});
     radarEntries = radarEntries.filter(e => e.key !== editEntryKey);
   } else if(editMode === "blindar"){
     if(mktMsRestantes(entry) > 0) return; // solo se puede blindar estando libre
     const blindarDate = document.getElementById("blindarDate").value;
     if(!blindarDate) return;
-    syncSeguimiento("remove", {key: entry.key});
     entry.fecha = blindarDate;
     entry.proteccionMs = PROTECCION_BLINDAJE_MS;
     entry.confirmado = false;
-    syncSeguimiento("add", entry);
+    await syncSeguimiento("update", entry);
   }
 
   await saveRadar();
