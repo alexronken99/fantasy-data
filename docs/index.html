@@ -363,10 +363,11 @@
   <div class="modal">
     <h3 id="editName">Jugador</h3>
     <p class="mp-team" id="editInfo"></p>
-    <div class="modal-actions" style="margin-top:0; margin-bottom:16px;">
+    <div class="modal-actions" style="margin-top:0; margin-bottom:16px; flex-wrap:wrap;">
       <button class="btn-secondary" id="editModeRaise" style="flex:1;">Subir cláusula</button>
       <button class="btn-secondary" id="editModeTransfer" style="flex:1;">Transferir</button>
       <button class="btn-secondary" id="editModeSell" style="flex:1;">Vender al mercado</button>
+      <button class="btn-secondary" id="editModeBlindar" style="flex:1; display:none;">Blindar (48h)</button>
     </div>
     <div id="editRaiseFields">
       <label>Nueva cláusula (€)</label>
@@ -383,6 +384,11 @@
     </div>
     <div id="editSellFields" style="display:none;">
       <p class="mp-team" style="margin-top:12px;">Se dejará de seguir a este jugador (vuelve a ser libre, ya no lo tiene ningún manager).</p>
+    </div>
+    <div id="editBlindarFields" style="display:none;">
+      <p class="mp-team" style="margin-top:12px;">El jugador queda protegido 48 horas desde la fecha y hora que indiques. Mientras dure esa protección, no se podrá volver a blindar.</p>
+      <label>Fecha y hora del blindaje</label>
+      <input type="datetime-local" id="blindarDate" />
     </div>
     <div class="modal-actions">
       <button class="btn-secondary" id="editCancel">Cancelar</button>
@@ -565,9 +571,13 @@ function fechaLabelFor(fecha){
   return `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+const PROTECCION_NORMAL_MS = 14 * 24 * 60 * 60 * 1000;
+const PROTECCION_BLINDAJE_MS = 48 * 60 * 60 * 1000;
+
 function mktMsRestantes(e){
   const compra = new Date(e.fecha);
-  const liberaEn = new Date(compra.getTime() + 14*24*60*60*1000);
+  const duracion = e.proteccionMs || PROTECCION_NORMAL_MS;
+  const liberaEn = new Date(compra.getTime() + duracion);
   return liberaEn - new Date();
 }
 
@@ -577,13 +587,15 @@ function liberaLabelFor(e){
     if(e.confirmado) return "Libre";
     return `<span class="limbo-label">⚠️ Por confirmar</span><br>Libre`;
   }
+  const esBlindaje = e.proteccionMs === PROTECCION_BLINDAJE_MS;
+  const prefix = esBlindaje ? "🛡️ " : "";
   const totalMinutes = Math.floor(ms / 60000);
   if(totalMinutes < 72 * 60){
     const h = Math.floor(totalMinutes / 60);
     const m = totalMinutes % 60;
-    return `${h}h ${m}min`;
+    return `${prefix}${h}h ${m}min`;
   }
-  return Math.ceil(ms / 86400000) + " días";
+  return prefix + Math.ceil(ms / 86400000) + " días";
 }
 
 const DATA_REPO_BASE = "https://raw.githubusercontent.com/alexronken99/fantasy-data/main";
@@ -605,7 +617,8 @@ function syncSeguimiento(action, entry){
         playerId: entry.playerId,
         clausula: entry.clausula,
         valorAlFichar: entry.valorAlFichar,
-        confirmado: !!entry.confirmado
+        confirmado: !!entry.confirmado,
+        proteccionMs: entry.proteccionMs || null
       })
     });
   }catch(e){ /* fallo silencioso: no debe romper el uso normal del dashboard */ }
@@ -638,7 +651,8 @@ async function resyncAllSeguimiento(){
           playerId: entry.playerId,
           clausula: entry.clausula,
           valorAlFichar: entry.valorAlFichar,
-          confirmado: !!entry.confirmado
+          confirmado: !!entry.confirmado,
+          proteccionMs: entry.proteccionMs || null
         }))
       })
     });
@@ -656,7 +670,8 @@ async function loadStorage(){
       fecha: Number(e.fecha),
       clausula: e.clausula != null && e.clausula !== "" ? Number(e.clausula) : null,
       valorAlFichar: e.valorAlFichar != null && e.valorAlFichar !== "" ? Number(e.valorAlFichar) : null,
-      confirmado: e.confirmado === true || e.confirmado === "true" || e.confirmado === 1
+      confirmado: e.confirmado === true || e.confirmado === "true" || e.confirmado === 1,
+      proteccionMs: e.proteccionMs != null && e.proteccionMs !== "" ? Number(e.proteccionMs) : null
     }));
     await saveRadar(); // refresca la copia local con lo último del puente
   }catch(e){
@@ -1477,7 +1492,9 @@ function openModal(playerId){
       rival,
       fecha,
       clausula,
-      valorAlFichar: p.marketValue
+      valorAlFichar: p.marketValue,
+      confirmado: false,
+      proteccionMs: PROTECCION_NORMAL_MS
     });
     syncSeguimiento("add", radarEntries[radarEntries.length - 1]);
     await saveRadar();
@@ -1497,9 +1514,11 @@ function setEditMode(mode){
   document.getElementById("editRaiseFields").style.display = mode === "raise" ? "" : "none";
   document.getElementById("editTransferFields").style.display = mode === "transfer" ? "" : "none";
   document.getElementById("editSellFields").style.display = mode === "sell" ? "" : "none";
+  document.getElementById("editBlindarFields").style.display = mode === "blindar" ? "" : "none";
   document.getElementById("editModeRaise").classList.toggle("active", mode === "raise");
   document.getElementById("editModeTransfer").classList.toggle("active", mode === "transfer");
   document.getElementById("editModeSell").classList.toggle("active", mode === "sell");
+  document.getElementById("editModeBlindar").classList.toggle("active", mode === "blindar");
 }
 
 function openEditModal(entryKey){
@@ -1514,6 +1533,9 @@ function openEditModal(entryKey){
   buildManagerChips("transferManagerSlider", "transferManager", "");
   document.getElementById("transferClause").value = "";
   document.getElementById("transferDate").value = nowLocalDatetime();
+  document.getElementById("blindarDate").value = nowLocalDatetime();
+  const esLibre = mktMsRestantes(entry) <= 0;
+  document.getElementById("editModeBlindar").style.display = esLibre ? "" : "none";
   setEditMode("raise");
   document.getElementById("editOverlay").classList.add("show");
 }
@@ -1521,6 +1543,7 @@ function openEditModal(entryKey){
 document.getElementById("editModeRaise").onclick = () => setEditMode("raise");
 document.getElementById("editModeTransfer").onclick = () => setEditMode("transfer");
 document.getElementById("editModeSell").onclick = () => setEditMode("sell");
+document.getElementById("editModeBlindar").onclick = () => setEditMode("blindar");
 
 let conflictKey = null;
 
@@ -1576,10 +1599,20 @@ document.getElementById("editSave").onclick = async () => {
     entry.fecha = date;
     entry.valorAlFichar = player ? player.marketValue : entry.valorAlFichar;
     entry.confirmado = false; // empieza un ciclo de protección nuevo
+    entry.proteccionMs = PROTECCION_NORMAL_MS;
     syncSeguimiento("add", entry);
   } else if(editMode === "sell"){
     syncSeguimiento("remove", {key: editEntryKey});
     radarEntries = radarEntries.filter(e => e.key !== editEntryKey);
+  } else if(editMode === "blindar"){
+    if(mktMsRestantes(entry) > 0) return; // solo se puede blindar estando libre
+    const blindarDate = document.getElementById("blindarDate").value;
+    if(!blindarDate) return;
+    syncSeguimiento("remove", {key: entry.key});
+    entry.fecha = blindarDate;
+    entry.proteccionMs = PROTECCION_BLINDAJE_MS;
+    entry.confirmado = false;
+    syncSeguimiento("add", entry);
   }
 
   await saveRadar();
