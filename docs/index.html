@@ -160,6 +160,8 @@
 
   .mkt-alert{background:rgba(217,87,74,0.12);}
   .mkt-soon{background:rgba(227,168,59,0.10);}
+  .mkt-limbo{background:rgba(217,87,74,0.20); box-shadow:inset 3px 0 0 var(--alert);}
+  .limbo-label{color:var(--alert); font-weight:700; font-size:11px; text-transform:uppercase; letter-spacing:0.02em;}
   .diff-pos{color:var(--turf); font-weight:600;}
   .diff-neg{color:var(--alert); font-weight:600;}
 
@@ -570,7 +572,7 @@ function mktMsRestantes(e){
 
 function liberaLabelFor(e){
   const ms = mktMsRestantes(e);
-  if(ms <= 0) return "Ya libre";
+  if(ms <= 0) return `<span class="limbo-label">⚠️ Por confirmar</span><br>Libre`;
   const totalMinutes = Math.floor(ms / 60000);
   if(totalMinutes < 72 * 60){
     const h = Math.floor(totalMinutes / 60);
@@ -1046,7 +1048,7 @@ function renderMercadoView(){
     const starred = isStarred(e.playerId);
     const rowClass = [
       starred ? "mkt-starred" : "",
-      msRestantes <= 0 ? "" : msRestantes <= 72*3600000 ? "mkt-soon" : ""
+      msRestantes <= 0 ? "mkt-limbo" : msRestantes <= 72*3600000 ? "mkt-soon" : ""
     ].filter(Boolean).join(" ");
     const liberaLabel = liberaLabelFor(e);
     const valorActual = player ? player.marketValue : null;
@@ -1076,7 +1078,7 @@ function renderMercadoView(){
       </td>
     </tr>`;
 
-    cardsHtml += `<div class="player-card${starred ? ' mkt-starred' : ''}">
+    cardsHtml += `<div class="player-card ${rowClass}${starred ? ' mkt-starred' : ''}">
       <div class="pc-top">
         <div class="pc-name-wrap">
           <button class="star-btn${starred ? ' starred' : ''}" data-star-id="${e.playerId}" title="Marcar interés">${starred ? "★" : "☆"}</button>
@@ -1091,6 +1093,7 @@ function renderMercadoView(){
       <div class="pc-grid">
         <div><span class="pc-label">Manager</span><br>${managerBadge(e.rival)}</div>
         <div><span class="pc-label">Valor actual</span><br>${valorActual != null ? fmtEuro(valorActual) : "—"}</div>
+        <div><span class="pc-label">Tendencia</span><br><span class="trend ${t.dir}">${arrow} ${t.diff !== 0 ? fmtEuro(Math.abs(t.diff)) : "—"}</span></div>
         <div><span class="pc-label">Cláusula</span><br>${e.clausula ? fmtEuro(e.clausula) : "—"}</div>
         <div><span class="pc-label">Diferencia</span><br><span class="${diffClass}">${diffLabel}</span></div>
         <div><span class="pc-label">Rentabilidad</span><br><span class="${reco.cls}">${reco.text}</span></div>
