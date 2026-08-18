@@ -863,8 +863,8 @@ function learnedBidRatio(){
 function renderTable(){
   let list = players.filter(p => matchesPos(p.positionId) && matchesTeam(p.teamAbbr));
   if(searchTerm){
-    const s = searchTerm.toLowerCase();
-    list = list.filter(p => p.nickname.toLowerCase().includes(s));
+    const s = normalizeName(searchTerm);
+    list = list.filter(p => normalizeName(p.nickname).includes(s));
   }
   const ratio = learnedBidRatio();
   list = sortPlayers(list, ratio);
@@ -1024,7 +1024,7 @@ function renderMercadoView(){
   const box = document.getElementById("mercadoWrap");
   const filtered = radarEntries.filter(e => {
     const player = players.find(p => String(p.id) === String(e.playerId));
-    const nameMatch = !searchTermMkt || (player ? player.nickname : e.nombre).toLowerCase().includes(searchTermMkt.toLowerCase());
+    const nameMatch = !searchTermMkt || normalizeName(player ? player.nickname : e.nombre).includes(normalizeName(searchTermMkt));
     return nameMatch &&
            matchesPos(player ? player.positionId : null) &&
            matchesTeam(player ? player.teamAbbr : null) &&
