@@ -1112,7 +1112,7 @@ function renderMercadoView(){
   }
   const mktCols = [
     ["star",""], ["name","Jugador"], ["team","Equipo"], ["pos","Posición"], ["manager","Manager"], ["value","Valor actual"],
-    ["trend","Tendencia"], ["clausula","Cláusula pagada"], ["diff","Diferencia"], ["reco","Rentabilidad"], ["libera","Libera en"]
+    ["trend","Tendencia"], ["sparkline","Últimos días"], ["clausula","Cláusula pagada"], ["diff","Diferencia"], ["reco","Rentabilidad"], ["libera","Libera en"]
   ];
   let html = "<table><thead><tr>" + mktCols.map(([key,label]) =>
     `<th data-sort-key="${key}" data-table="mkt">${label}${sortArrow(key, mktSortKey, mktSortDir)}</th>`
@@ -1145,6 +1145,7 @@ function renderMercadoView(){
       <td>${managerBadge(e.rival)}</td>
       <td class="pval">${valorActual != null ? fmtEuro(valorActual) : "—"}</td>
       <td class="trend ${t.dir}">${arrow} ${t.diff !== 0 ? fmtEuro(Math.abs(t.diff)) : "—"}</td>
+      <td>${player ? sparklineSVG(player.id) : "—"}</td>
       <td class="pval">${e.clausula ? fmtEuro(e.clausula) : "—"}</td>
       <td class="${diffClass}">${diffLabel}</td>
       <td class="${reco.cls}" title="Compara la cláusula con el valor proyectado a 14 días si se mantiene la tendencia diaria actual">${reco.text}</td>
@@ -1177,6 +1178,7 @@ function renderMercadoView(){
         <div><span class="pc-label">Diferencia</span><br><span class="${diffClass}">${diffLabel}</span></div>
         <div><span class="pc-label">Rentabilidad</span><br><span class="${reco.cls}">${reco.text}</span></div>
         <div><span class="pc-label">Libera en</span><br>${liberaLabel}</div>
+        <div style="grid-column:1 / -1;"><span class="pc-label">Últimos días</span><br>${player ? sparklineSVG(player.id) : "—"}</div>
       </div>
       ${(msRestantes <= 0 && e.confirmado) ? "" : `<div class="pc-label" style="margin-top:6px;">fichado ${fechaLabelFor(e.fecha)}</div>`}
     </div>`;
