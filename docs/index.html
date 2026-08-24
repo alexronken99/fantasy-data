@@ -913,7 +913,7 @@ function renderTable(){
   document.getElementById("rowCount").textContent = list.length + " jugadores" + (ratio ? ` · puja sugerida basada en ${ratio.count} operación(es) de tu liga` : " · puja sugerida: registra cláusulas en Mercado para activarla");
 
   const cols = [
-    ["name","Jugador"], ["team","Equipo"], ["pos","Posición"], ["value","Valor"], ["trend","Tendencia"],
+    ["name","Jugador"], ["team","Equipo"], ["pos","Posición"], ["value","Valor"], ["trend","Tendencia"], ["sparkline","Últimos días"],
     ["points","Puntos"], ["avg","Media"], ["sugerida","Puja sugerida"], ["titular","Titular"], ["rival","Próx. rival"]
   ];
   let html = "<table><thead><tr>" + cols.map(([key,label]) =>
@@ -938,6 +938,7 @@ function renderTable(){
       <td>${posBadge(p.positionId)}</td>
       <td class="pval">${fmtEuro(p.marketValue)}</td>
       <td class="trend ${t.dir}">${arrow} ${t.diff !== 0 ? fmtEuro(Math.abs(t.diff)) : "sin datos previos"}</td>
+      <td>${sparklineSVG(p.id)}</td>
       <td class="ppts">${p.points ?? "—"}</td>
       <td class="ppts">${p.averagePoints ? p.averagePoints.toFixed(2) : "—"}</td>
       <td class="pval">${sugerida}</td>
@@ -956,6 +957,7 @@ function renderTable(){
         <div><span class="pc-label">Tendencia</span><br><span class="trend ${t.dir}">${arrow} ${t.diff !== 0 ? fmtEuro(Math.abs(t.diff)) : "—"}</span></div>
         <div><span class="pc-label">Titular</span><br>${startProbLabel(p.startProb)}</div>
         <div><span class="pc-label">Próx. rival</span><br>${rivalCell}</div>
+        <div style="grid-column:1 / -1;"><span class="pc-label">Últimos días</span><br>${sparklineSVG(p.id)}</div>
       </div>
       <button class="track-btn" data-id="${p.id}">Marcar</button>
     </div>`;
@@ -991,6 +993,33 @@ async function loadHistory(){
   }catch(e){
     historyByPlayer = {};
   }
+}
+
+function sparklineSVG(playerId){
+  const hist = historyByPlayer[playerId];
+  if(!hist || hist.length < 2) return `<span class="ppts" style="font-size:10px;">sin histórico</span>`;
+
+  const deltas = [];
+  for(let i = 1; i < hist.length; i++){
+    deltas.push(hist[i].value - hist[i-1].value);
+  }
+  const maxAbs = Math.max(...deltas.map(d => Math.abs(d)), 1);
+  const barW = 9, gap = 3, h = 26;
+  const totalW = deltas.length * (barW + gap) - gap;
+
+  let bars = '';
+  deltas.forEach((d, i) => {
+    const barH = Math.max(2, Math.round((Math.abs(d) / maxAbs) * (h/2 - 3)));
+    const x = i * (barW + gap);
+    const color = d > 0 ? "#5BC17A" : d < 0 ? "#D9574A" : "#9FB3A8";
+    const y = d >= 0 ? (h/2 - barH) : (h/2);
+    bars += `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" fill="${color}" rx="1.5"/>`;
+  });
+
+  return `<svg width="${totalW}" height="${h}" style="vertical-align:middle;" title="Últimos ${deltas.length} días (izq. = más antiguo)">
+    <line x1="0" y1="${h/2}" x2="${totalW}" y2="${h/2}" stroke="rgba(233,236,229,0.15)" stroke-width="1"/>
+    ${bars}
+  </svg>`;
 }
 
 function weeklyTrend(p){
