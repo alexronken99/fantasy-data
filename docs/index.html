@@ -208,6 +208,7 @@
     .once-layout{flex-direction:column;}
   }
   .mkt-starred{background:rgba(227,168,59,0.16) !important;}
+  tbody tr.mkt-starred:hover{background:rgba(227,168,59,0.24) !important;}
   .star-btn{background:none; border:none; cursor:pointer; font-size:18px; color:var(--chalk-dim); line-height:1;}
   .star-btn.starred{color:var(--amber);}
   .player-cards{display:none;}
@@ -479,7 +480,7 @@ function teamCrest(teamAbbr){
 function posBadge(positionId){
   const c = POSITION_COLORS[positionId] || {bg:"#5a5a5a", fg:"#ffffff"};
   const label = POSITIONS[positionId] || "—";
-  return `<span class="pos-badge" style="background:${c.bg};color:${c.fg};">${label}</span>`;
+  return `<span class="pos-badge" style="background:${c.bg}22;color:${c.bg};border:1.5px solid ${c.bg};">${label}</span>`;
 }
 
 function managerBadge(name){
