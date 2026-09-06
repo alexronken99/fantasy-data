@@ -965,7 +965,11 @@ function renderTable(){
     </div>`;
   });
   html += "</tbody></table>";
-  document.getElementById("tableWrap").innerHTML = html + `<div class="player-cards">${cardsHtml}</div>`;
+  const jugSortButtonsCols = [["value","Valor"], ["trend","Tendencia"], ["titular","Titular"], ["sugerida","Puja sugerida"], ["rival","Próx. rival"]];
+  const jugSortButtonsHtml = `<div class="sort-buttons">${jugSortButtonsCols.map(([k,label]) =>
+    `<button data-sort-key="${k}" class="${jugSortKey === k ? 'active' : ''}">${label}${sortArrow(k, jugSortKey, jugSortDir)}</button>`
+  ).join("")}</div>`;
+  document.getElementById("tableWrap").innerHTML = html + `<div class="player-cards">${jugSortButtonsHtml}${cardsHtml}</div>`;
 
   document.querySelectorAll(".track-btn").forEach(btn => {
     btn.onclick = () => openModal(btn.dataset.id);
@@ -973,6 +977,14 @@ function renderTable(){
   document.querySelectorAll('#tableWrap th[data-sort-key]').forEach(th => {
     th.onclick = () => {
       const key = th.dataset.sortKey;
+      if(jugSortKey === key){ jugSortDir = jugSortDir === 1 ? -1 : 1; }
+      else { jugSortKey = key; jugSortDir = 1; }
+      renderTable();
+    };
+  });
+  document.querySelectorAll('#tableWrap .sort-buttons button').forEach(btn => {
+    btn.onclick = () => {
+      const key = btn.dataset.sortKey;
       if(jugSortKey === key){ jugSortDir = jugSortDir === 1 ? -1 : 1; }
       else { jugSortKey = key; jugSortDir = 1; }
       renderTable();
@@ -1638,7 +1650,7 @@ document.getElementById("editSave").onclick = async () => {
     const amount = parseEuroInput(document.getElementById("raiseAmount").value);
     if(!amount) return;
     entry.clausula = amount;
-    entry.confirmado = true;
+    if(mktMsRestantes(entry) <= 0) entry.confirmado = true; // solo si ya estaba liberado; si sigue protegido, no tocar
     await syncSeguimiento("update", entry);
   } else if(editMode === "transfer"){
     const manager = document.getElementById("transferManager").value.trim();
