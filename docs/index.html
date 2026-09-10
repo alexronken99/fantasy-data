@@ -1198,7 +1198,11 @@ function renderMercadoView(){
     </div>`;
   });
   html += "</tbody></table>";
-  box.innerHTML = html + `<div class="player-cards">${cardsHtml}</div>`;
+  const mktSortButtonsCols = [["value","Valor"], ["trend","Tendencia"], ["clausula","Cláusula"], ["diff","Diferencia"], ["reco","Rentabilidad"], ["libera","Libera en"]];
+  const mktSortButtonsHtml = `<div class="sort-buttons">${mktSortButtonsCols.map(([k,label]) =>
+    `<button data-sort-key="${k}" class="${mktSortKey === k ? 'active' : ''}">${label}${sortArrow(k, mktSortKey, mktSortDir)}</button>`
+  ).join("")}</div>`;
+  box.innerHTML = html + `<div class="player-cards">${mktSortButtonsHtml}${cardsHtml}</div>`;
   document.querySelectorAll("#mercadoWrap .star-btn").forEach(btn => {
     btn.onclick = () => toggleStar(btn.dataset.starId);
   });
@@ -1226,6 +1230,14 @@ function renderMercadoView(){
   document.querySelectorAll('#mercadoWrap th[data-sort-key]').forEach(th => {
     th.onclick = () => {
       const key = th.dataset.sortKey;
+      if(mktSortKey === key){ mktSortDir = mktSortDir === 1 ? -1 : 1; }
+      else { mktSortKey = key; mktSortDir = 1; }
+      renderMercadoView();
+    };
+  });
+  document.querySelectorAll('#mercadoWrap .sort-buttons button').forEach(btn => {
+    btn.onclick = () => {
+      const key = btn.dataset.sortKey;
       if(mktSortKey === key){ mktSortDir = mktSortDir === 1 ? -1 : 1; }
       else { mktSortKey = key; mktSortDir = 1; }
       renderMercadoView();
