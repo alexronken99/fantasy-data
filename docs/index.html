@@ -1,1819 +1,854 @@
-<!doctype html>
-<html lang="es">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>LaLiga Fantasy</title>
-<link rel="icon" href="https://assets.laliga.com/assets/public/logos/favicon.ico">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Teko:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-<style>
-  :root{
-    --pitch-deep:#0E2E23;
-    --pitch-mid:#153B2C;
-    --pitch-line:#254D3B;
-    --turf:#5BC17A;
-    --turf-dim:#3D8558;
-    --chalk:#E9ECE5;
-    --chalk-dim:#9FB3A8;
-    --amber:#E3A83B;
-    --alert:#D9574A;
-    --panel:#102A21;
-  }
-  *{box-sizing:border-box;}
-  html,body{margin:0;padding:0;background:var(--pitch-deep);color:var(--chalk);font-family:'Inter',sans-serif;}
-  body{
-    background-image: radial-gradient(ellipse at top, #123526 0%, var(--pitch-deep) 60%);
-    min-height:100vh;
-  }
-  .display{font-family:'Teko',sans-serif; font-weight:600; letter-spacing:0.02em;}
-  .mono{font-family:'JetBrains Mono',monospace;}
+import os
+import re
+import sys
+import json
+import base64
+import time
+import unicodedata
+import requests
 
-  /* ---- Ticker ---- */
-  .ticker-wrap{
-    border-bottom:1px solid var(--pitch-line);
-    background:var(--panel);
-    overflow:hidden;
-    white-space:nowrap;
-    padding:8px 0;
-  }
-  .ticker{display:inline-block; padding-left:100%; animation:scroll 38s linear infinite;}
-  .ticker-wrap:hover .ticker{animation-play-state:paused;}
-  @keyframes scroll{ 0%{transform:translateX(0);} 100%{transform:translateX(-100%);} }
-  .tick-item{display:inline-flex; align-items:baseline; gap:6px; margin-right:36px; font-family:'JetBrains Mono',monospace; font-size:13px;}
-  .tick-item .name{color:var(--chalk-dim);}
-  .tick-up{color:var(--turf);}
-  .tick-down{color:var(--alert);}
+from bs4 import BeautifulSoup
+from notion_client import Client
+from dotenv import load_dotenv
 
-  /* ---- Header ---- */
-  header{padding:28px 32px 10px; display:flex; align-items:flex-end; justify-content:space-between; flex-wrap:wrap; gap:12px;}
-  .brand h1{
-    font-size:52px; line-height:0.85; margin:0; text-transform:uppercase;
-    color:var(--chalk);
-  }
-  .brand h1 span{color:var(--turf);}
-  .brand p{margin:6px 0 0; color:var(--chalk-dim); font-size:13px; letter-spacing:0.04em; text-transform:uppercase;}
-  .status{font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--chalk-dim); text-align:right;}
-  .status b{color:var(--amber);}
+sys.stdout.reconfigure(line_buffering=True)
 
-  /* ---- Layout ---- */
-  .layout{display:block; padding:0 32px 40px;}
+load_dotenv()
 
-  /* position rail */
-  .rail{display:flex; flex-direction:column; gap:10px; position:sticky; top:20px; padding-top:20px;}
-  .rail button{
-    background:var(--panel); border:1px solid var(--pitch-line); color:var(--chalk-dim);
-    font-family:'Teko',sans-serif; font-size:22px; letter-spacing:0.05em;
-    border-radius:10px; padding:10px 0; cursor:pointer; text-transform:uppercase;
-    writing-mode:horizontal-tb;
-  }
-  .rail button.active{ background:var(--turf-dim); color:var(--pitch-deep); border-color:var(--turf); font-weight:700;}
-  .rail button:hover{ border-color:var(--turf); color:var(--chalk);}
 
-  /* main panel */
-  .main{padding:20px 24px;}
-  .toolbar{display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap; align-items:center;}
-  .toolbar input[type=text]{
-    flex:1; min-width:180px; background:var(--panel); border:1px solid var(--pitch-line); color:var(--chalk);
-    padding:10px 14px; border-radius:8px; font-family:'Inter',sans-serif; font-size:14px;
-  }
-  .toolbar select{
-    background:var(--panel); border:1px solid var(--pitch-line); color:var(--chalk);
-    padding:10px 12px; border-radius:8px; font-family:'Inter',sans-serif; font-size:13px;
-  }
-  .count{color:var(--chalk-dim); font-size:12px; font-family:'JetBrains Mono',monospace;}
+NOTION_TOKEN = os.getenv("NOTION_TOKEN", "").strip()
+NOTION_DB_PLAYERS = os.getenv("NOTION_DB_PLAYERS", "").strip()
+NOTION_DB_TEAMS = os.getenv("NOTION_DB_TEAMS", "").strip()
 
-  table{width:100%; border-collapse:collapse; font-size:14px;}
-  thead th{
-    text-align:left; font-family:'Teko',sans-serif; font-size:16px; letter-spacing:0.05em; text-transform:uppercase;
-    color:var(--chalk-dim); border-bottom:1px solid var(--pitch-line); padding:8px 10px; cursor:pointer; user-select:none;
-  }
-  thead th:hover{color:var(--turf);}
-  tbody tr{border-bottom:1px solid rgba(37,77,59,0.5);}
-  tbody tr:hover{background:rgba(91,193,122,0.06);}
-  td{padding:10px; vertical-align:middle;}
-  .pname{font-weight:600;}
-  .pteam{
-    display:inline-block; font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--pitch-deep);
-    background:var(--chalk-dim); padding:2px 6px; border-radius:4px; margin-left:8px; letter-spacing:0.03em;
-  }
-  .pval{font-family:'JetBrains Mono',monospace; font-weight:600;}
-  .ppts{font-family:'JetBrains Mono',monospace; color:var(--chalk-dim);}
-  .trend{font-family:'JetBrains Mono',monospace; font-size:12px;}
-  .trend.up{color:var(--turf);}
-  .trend.down{color:var(--alert);}
-  .trend.flat{color:var(--chalk-dim);}
-  .track-btn{
-    background:transparent; border:1px solid var(--pitch-line); color:var(--chalk-dim); border-radius:6px;
-    padding:5px 10px; font-size:11px; cursor:pointer; font-family:'Inter',sans-serif; text-transform:uppercase; letter-spacing:0.03em;
-  }
-  .track-btn:hover{border-color:var(--amber); color:var(--amber);}
-  .status-flag{font-size:10px; padding:2px 6px; border-radius:4px; margin-left:6px; text-transform:uppercase; font-family:'Inter',sans-serif; font-weight:600;}
-  .status-injured{background:rgba(217,87,74,0.18); color:var(--alert);}
-  .status-doubtful, .status-suspended{background:rgba(227,168,59,0.18); color:var(--amber);}
 
-  /* radar panel */
-  .radar-panel{padding:20px 0 20px 24px; position:sticky; top:20px;}
-  .radar-panel h2{font-size:26px; margin:0 0 4px; text-transform:uppercase; letter-spacing:0.03em;}
-  .radar-panel .sub{color:var(--chalk-dim); font-size:12px; margin-bottom:16px;}
-  .radar-card{
-    background:var(--panel); border:1px solid var(--pitch-line); border-radius:12px; padding:14px; margin-bottom:12px;
-    display:flex; gap:12px; align-items:center;
-  }
-  .ring{position:relative; width:56px; height:56px; flex:none;}
-  .ring svg{transform:rotate(-90deg);}
-  .ring-label{
-    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
-    font-family:'JetBrains Mono',monospace; font-size:15px; font-weight:700;
-  }
-  .radar-info{flex:1; min-width:0;}
-  .radar-info .rname{font-weight:600; font-size:14px;}
-  .radar-info .rrival{color:var(--amber); font-size:12px; font-family:'JetBrains Mono',monospace;}
-  .radar-info .rval{color:var(--chalk-dim); font-size:12px; font-family:'JetBrains Mono',monospace; margin-top:2px;}
-  .rm-btn{background:none; border:none; color:var(--chalk-dim); cursor:pointer; font-size:16px; flex:none;}
-  .rm-btn:hover{color:var(--alert);}
-  .empty-radar{color:var(--chalk-dim); font-size:13px; border:1px dashed var(--pitch-line); border-radius:10px; padding:18px; text-align:center;}
+if not NOTION_TOKEN:
+    raise ValueError("❌ NOTION_TOKEN vacío")
 
-  /* modal */
-  .overlay{position:fixed; inset:0; background:rgba(6,18,14,0.75); display:none; align-items:center; justify-content:center; z-index:50;}
-  .overlay.show{display:flex;}
-  .modal{background:var(--panel); border:1px solid var(--pitch-line); border-radius:14px; padding:24px; width:340px; position:relative;}
-  .modal h3{margin:0 0 4px; font-size:24px; text-transform:uppercase; font-family:'Teko',sans-serif;}
-  .modal p.mp-team{color:var(--chalk-dim); font-size:12px; margin:0 0 16px;}
-  .modal label{display:block; font-size:11px; color:var(--chalk-dim); text-transform:uppercase; letter-spacing:0.04em; margin:12px 0 4px;}
-  .modal input{width:100%; background:var(--pitch-deep); border:1px solid var(--pitch-line); color:var(--chalk); padding:9px 10px; border-radius:8px; font-family:'Inter',sans-serif;}
-  .modal-actions{display:flex; gap:10px; margin-top:20px;}
-  .btn-primary{flex:1; background:var(--turf); color:var(--pitch-deep); border:none; padding:10px; border-radius:8px; font-weight:700; cursor:pointer; text-transform:uppercase; font-size:13px; letter-spacing:0.03em;}
-  .btn-secondary{background:none; border:1px solid var(--pitch-line); color:var(--chalk-dim); padding:10px 14px; border-radius:8px; cursor:pointer;}
-  .loading{padding:60px; text-align:center; color:var(--chalk-dim); font-family:'JetBrains Mono',monospace;}
+if not NOTION_DB_PLAYERS:
+    raise ValueError("❌ NOTION_DB_PLAYERS vacío")
 
-  /* view tabs */
-  .view-tabs{display:flex; gap:8px; padding:0 32px; margin-top:14px;}
-  .view-tabs button{
-    background:var(--panel); border:1px solid var(--pitch-line); border-bottom:none; color:var(--chalk-dim);
-    font-family:'Teko',sans-serif; font-size:20px; letter-spacing:0.04em; text-transform:uppercase;
-    padding:8px 22px; border-radius:8px 8px 0 0; cursor:pointer;
-  }
-  .view-tabs button.active{ background:var(--turf-dim); color:var(--pitch-deep); font-weight:700; border-color:var(--turf);}
-  .view-tabs button:hover:not(.active){ color:var(--chalk); }
-  .view-full{padding:16px 32px 40px;}
+if not NOTION_DB_TEAMS:
+    raise ValueError("❌ NOTION_DB_TEAMS vacío")
 
-  .mkt-alert{background:rgba(217,87,74,0.12);}
-  .mkt-soon{background:rgba(59,130,246,0.14);}
-  tbody tr.mkt-soon:hover{background:rgba(59,130,246,0.22);}
-  .mkt-limbo{background:rgba(217,87,74,0.20); box-shadow:inset 3px 0 0 var(--alert);}
-  tbody tr.mkt-limbo:hover{background:rgba(217,87,74,0.28); box-shadow:inset 3px 0 0 var(--alert);}
-  .limbo-label{color:var(--alert); font-weight:700; font-size:11px; text-transform:uppercase; letter-spacing:0.02em;}
-  .diff-pos{color:var(--turf); font-weight:600;}
-  .diff-neg{color:var(--alert); font-weight:600;}
 
-  .combo{
-    background:var(--panel); border:1px solid var(--pitch-line); color:var(--chalk);
-    padding:10px 14px; border-radius:8px; font-family:'Inter',sans-serif; font-size:14px; min-width:150px;
-  }
-  .pos-badge, .mgr-badge{
-    display:inline-block; padding:3px 9px; border-radius:5px; font-size:11px; font-weight:700;
-    text-transform:uppercase; letter-spacing:0.02em; font-family:'Inter',sans-serif; white-space:nowrap;
-  }
-  .team-crest{width:26px; height:26px; object-fit:contain; vertical-align:middle;}
+notion = Client(auth=NOTION_TOKEN, timeout_ms=30000)
 
-  .pitch{
-    background: repeating-linear-gradient(0deg, #123b2c, #123b2c 40px, #143f2f 40px, #143f2f 80px);
-    border:2px solid var(--pitch-line); border-radius:14px; padding:24px 12px;
-    display:flex; flex-direction:column; gap:18px;
-  }
-  .pitch-row{display:flex; justify-content:center; gap:18px; flex-wrap:wrap;}
-  .pitch-card{
-    background:rgba(16,42,33,0.9); border:1px solid var(--pitch-line); border-radius:10px;
-    padding:8px 10px; text-align:center; min-width:90px;
-  }
-  .pitch-card .pname{display:block; font-size:12px; margin-top:4px;}
-  .pitch-card .pscore{display:block; font-size:10px; color:var(--chalk-dim); font-family:'JetBrains Mono',monospace; margin-top:2px;}
-  .formation-label{font-family:'Teko',sans-serif; font-size:22px; color:var(--turf); text-transform:uppercase; margin-bottom:10px;}
-  .btn-secondary.active{background:var(--turf-dim); color:var(--pitch-deep); border-color:var(--turf); font-weight:700;}
-  .manager-slider{display:flex; flex-direction:column; gap:6px; overflow-y:auto; max-height:220px; padding:2px; margin-bottom:4px;}
-  .manager-chip{cursor:pointer; opacity:0.5; transition:opacity 0.15s; flex:none; text-align:center;}
-  .manager-chip.selected{opacity:1; box-shadow:0 0 0 2px var(--turf);}
-  .captain-badge{
-    display:inline-block; background:var(--amber); color:#1a1a1a; font-weight:700; font-size:10px;
-    border-radius:50%; width:16px; height:16px; line-height:16px; text-align:center; margin-left:4px;
-  }
-  .once-layout{display:flex; gap:28px; align-items:flex-start;}
-  .once-left{flex:1 1 50%; min-width:0;}
-  .once-right{flex:1 1 50%; min-width:0;}
-  .once-right h3{font-family:'Teko',sans-serif; font-size:20px; text-transform:uppercase; color:var(--turf); margin:18px 0 8px;}
-  .once-right h3:first-child{margin-top:0;}
-  .once-right table{font-size:13px;}
-  .once-right td{padding:6px 8px;}
-  @media (max-width: 900px){
-    .once-layout{flex-direction:column;}
-  }
-  .mkt-starred{background:rgba(227,168,59,0.16) !important;}
-  tbody tr.mkt-starred:hover{background:rgba(227,168,59,0.24) !important;}
-  .star-btn{background:none; border:none; cursor:pointer; font-size:18px; color:var(--chalk-dim); line-height:1;}
-  .star-btn.starred{color:var(--amber);}
-  .player-cards{display:none;}
 
-  /* ================= RESPONSIVE (móvil) ================= */
-  @media (max-width: 640px){
-    .brand h1{font-size:32px;}
-    .brand p{font-size:11px;}
-    header{padding:16px 14px 8px; gap:8px;}
-    .status{font-size:10px; text-align:left;}
 
-    .view-tabs{padding:0 14px; gap:4px; overflow-x:auto; flex-wrap:nowrap;}
-    .view-tabs button{font-size:15px; padding:7px 12px; flex:none;}
+URL = "https://www.analiticafantasy.com/fantasy-la-liga/mercado"
 
-    .layout{padding:0 14px 24px;}
-    .main{padding:12px 0;}
-    .view-full{padding:12px 14px 28px;}
 
-    .toolbar{gap:6px;}
-    .toolbar input[type=text]{min-width:0; flex:1 1 100%; font-size:16px; padding:9px 10px;}
-    .combo{min-width:0; flex:1 1 auto; font-size:16px; padding:9px 10px;}
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
+    "Accept-Encoding": "gzip, deflate",
+    "Connection": "keep-alive"
+}
 
-    #tableWrap table, #mercadoWrap table, #equiposWrap table{display:none;}
 
-    .sort-buttons{display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px;}
-    .sort-buttons button{
-      background:var(--panel); border:1px solid var(--pitch-line); color:var(--chalk-dim);
-      border-radius:8px; padding:7px 12px; font-size:12px; font-family:'Inter',sans-serif; cursor:pointer;
+# -----------------------------------
+# MAPPING EQUIPOS (IDs de analiticafantasy.com)
+# -----------------------------------
+
+TEAM_MAPPING = {
+
+    529: "BAR",
+    541: "RMA",
+    533: "VIL",
+    530: "ATM",
+    543: "BET",
+    538: "CEL",
+    546: "GET",
+    728: "RAY",
+    532: "VAL",
+    548: "RSO",
+    540: "ESP",
+    531: "ATH",
+    536: "SEV",
+    542: "ALA",
+    797: "ELC",
+    539: "LEV",
+    727: "OSA",
+    4665: "RAC",
+    544: "DEP",
+    535: "MAL",
+
+}
+
+POSITION_ID_TO_NAME = {1: "Portero", 2: "Defensa", 3: "Medio", 4: "Delantero", 5: "Entrenador"}
+
+
+# -----------------------------------
+# FORMATOS NUMÉRICOS
+# -----------------------------------
+
+def format_price(value):
+    return round(value / 1_000_000, 1)
+
+
+def format_trend(value):
+    return int(value / 1_000)
+
+
+# -----------------------------------
+# NORMALIZAR POSICIÓN
+# -----------------------------------
+
+def normalize_position(pos, is_coach):
+
+    if is_coach:
+        return "Entrenador"
+
+    if pos == "Mediocampista":
+        return "Medio"
+
+    return pos
+
+
+# -----------------------------------
+# NORMALIZAR NOMBRE (para cruzar con el dashboard)
+# -----------------------------------
+
+def normalize_name(name):
+    if not name:
+        return ""
+    name = unicodedata.normalize("NFKD", name)
+    name = "".join(c for c in name if not unicodedata.combining(c))
+    name = name.lower()
+    name = re.sub(r"[^a-z0-9\s]", "", name)
+    name = re.sub(r"\s+", " ", name).strip()
+    return name
+
+
+# -----------------------------------
+# SNAPSHOT DE MERCADO -> fantasy-data (repo público solo de datos)
+# -----------------------------------
+
+def save_market_snapshot(players):
+    from datetime import date
+
+    github_token = os.environ["FANTASY_DATA_TOKEN"]
+    data_repo = "alexronken99/fantasy-data"
+    api_base = f"https://api.github.com/repos/{data_repo}/contents"
+    headers = {
+        "Authorization": f"Bearer {github_token}",
+        "Accept": "application/vnd.github+json"
     }
-    .sort-buttons button.active{background:var(--turf-dim); color:var(--pitch-deep); border-color:var(--turf); font-weight:700;}
 
-    .team-card{
-      background:var(--panel); border:1px solid var(--pitch-line); border-radius:10px;
-      padding:10px 12px; margin-bottom:8px; font-size:13px;
+    def get_sha(path):
+        r = requests.get(f"{api_base}/{path}", headers=headers, timeout=30)
+        return r.json()["sha"] if r.status_code == 200 else None
+
+    def put_file(path, data_dict, message):
+        content = base64.b64encode(json.dumps(data_dict).encode()).decode()
+        body = {"message": message, "content": content}
+        sha = get_sha(path)
+        if sha:
+            body["sha"] = sha
+        r = requests.put(f"{api_base}/{path}", headers=headers, json=body, timeout=30)
+        r.raise_for_status()
+
+    today_snapshot = {
+        "date": str(date.today()),
+        "values": {
+            str(p["id"]): {
+                "name": p["name"],
+                "value": int(p["price"]),
+                "prevValue": int(p["price"]) - int(p["trend"]),
+                "team": TEAM_MAPPING.get(p["team_id"]),
+                "position": p["position"],
+                "probabilidad": p.get("titularity"),
+                "estado": p.get("status")
+            }
+            for p in players if p.get("name")
+        }
     }
-    .team-card .tc-top{margin-bottom:8px;}
-    .team-card .pc-grid{display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px 10px;}
 
-    .player-cards{display:flex; flex-direction:column; gap:8px;}
-    .player-card{
-      background:var(--panel); border:1px solid var(--pitch-line); border-radius:10px;
-      padding:10px 12px; font-size:13px;
+    prev_r = requests.get(f"{api_base}/latest.json", headers=headers, timeout=30)
+    if prev_r.status_code == 200:
+        yesterday_content = json.loads(base64.b64decode(prev_r.json()["content"]))
+        if yesterday_content.get("date") != today_snapshot["date"]:
+            put_file("previous.json", yesterday_content, f"previous snapshot {yesterday_content['date']}")
+
+    put_file("latest.json", today_snapshot, f"snapshot {today_snapshot['date']}")
+    print(f"✅ Snapshot de mercado subido a fantasy-data ({len(players)} jugadores)")
+
+
+# -----------------------------------
+# CALENDARIO / PRÓXIMOS RIVALES (con dificultad ya calculada por la web)
+# -----------------------------------
+
+TEAM_SLUGS = {
+    "ALA": "alaves",
+    "ATH": "athletic",
+    "ATM": "atletico",
+    "BAR": "barcelona",
+    "BET": "betis",
+    "CEL": "celta",
+    "DEP": "deportivo",
+    "ELC": "elche",
+    "ESP": "espanyol",
+    "GET": "getafe",
+    "LEV": "levante",
+    "MAL": "malaga",
+    "OSA": "osasuna",
+    "RAC": "racing",
+    "RAY": "rayo-vallecano",
+    "RMA": "real-madrid",
+    "RSO": "real-sociedad",
+    "SEV": "sevilla",
+    "VAL": "valencia",
+    "VIL": "villarreal",
+}
+
+# TEAM_MAPPING (arriba) usa los IDs de equipo de analiticafantasy.com (para los
+# jugadores). El calendario, en cambio, se sigue sacando de futbolfantasy.com,
+# que tiene su PROPIO sistema de IDs de equipo, distinto. Si usáramos el mismo
+# mapeo para las dos cosas, la detección de local/visitante fallaría (un
+# equipo podía salir emparejado "contra sí mismo" al jugar en casa).
+FUTBOLFANTASY_TEAM_ID_BY_ABBR = {
+    "ATH": 1, "ATM": 2, "BAR": 3, "BET": 4, "CEL": 5, "DEP": 6, "ESP": 7,
+    "GET": 8, "LEV": 10, "MAL": 11, "OSA": 13, "RAY": 14, "RMA": 15,
+    "RSO": 16, "SEV": 17, "VAL": 18, "ELC": 21, "VIL": 22, "ALA": 28, "RAC": 42,
+}
+
+DIFFICULTY_FROM_IMG = {
+    "vertical_1.jpg": 1,
+    "vertical_2.jpg": 2,
+    "vertical_3.jpg": 3,
+    "vertical_4.jpg": 4,
+    "vertical_5.jpg": 5,
+}
+
+
+def scrape_team_fixtures(team_abbr, slug):
+    url = f"https://www.futbolfantasy.com/laliga/equipos/{slug}/partidos"
+
+    try:
+        response = requests.get(url, headers=HEADERS, timeout=15)
+        response.raise_for_status()
+    except Exception as e:
+        print(f"❌ Error cargando calendario de {team_abbr}: {e}")
+        return []
+
+    soup = BeautifulSoup(response.text, "lxml")
+    fixtures = []
+
+    for a in soup.find_all("a", class_="partido"):
+        logo_img = a.select_one(".logo img")
+        if not logo_img or logo_img.get("alt") != "LaLiga":
+            continue  # descarta amistosos y otras competiciones
+
+        tooltip = a.get("data-tooltip", "")
+        if " - " not in tooltip:
+            continue
+        home_name, away_name = [t.strip() for t in tooltip.split(" - ", 1)]
+
+        fase_tag = a.select_one(".info .fase")
+        date_tag = a.select_one(".info .date")
+        jornada_text = fase_tag.get_text(strip=True) if fase_tag else ""
+        jornada_num = None
+        m = re.search(r"\d+", jornada_text)
+        if m:
+            jornada_num = int(m.group())
+
+        local_img = a.select_one(".equipo.local img")
+        local_src = local_img.get("src", "") if local_img else ""
+        m2 = re.search(r"/(\d+)\.png", local_src)
+        local_team_id = int(m2.group(1)) if m2 else None
+        is_home = (local_team_id is not None and local_team_id == FUTBOLFANTASY_TEAM_ID_BY_ABBR.get(team_abbr))
+
+        rival = away_name if is_home else home_name
+
+        dificultad_tag = a.select_one(".dificultad-container .dificultad img")
+        dificultad_num = None
+        if dificultad_tag:
+            src = dificultad_tag.get("src", "")
+            filename = src.rsplit("/", 1)[-1]
+            dificultad_num = DIFFICULTY_FROM_IMG.get(filename)
+
+        fixtures.append({
+            "jornada": jornada_num,
+            "rival": rival,
+            "local": is_home,
+            "fecha": date_tag.get_text(strip=True) if date_tag else None,
+            "dificultad": dificultad_num,
+            "url": a.get("href")
+        })
+
+    fixtures.sort(key=lambda f: (f["jornada"] is None, f["jornada"]))
+    return fixtures
+
+
+def scrape_all_fixtures():
+    all_fixtures = {}
+    for abbr, slug in TEAM_SLUGS.items():
+        fixtures = scrape_team_fixtures(abbr, slug)
+        if fixtures:
+            all_fixtures[abbr] = fixtures
+        time.sleep(0.5)
+    return all_fixtures
+
+
+def determine_current_jornada(fixtures_by_team):
+    """Calcula la jornada actual a partir del próximo partido de cada equipo
+    (usamos la más repetida, por si algún equipo tuviera un dato distinto)."""
+    from collections import Counter
+    jornadas = [
+        team_fixtures[0]["jornada"]
+        for team_fixtures in fixtures_by_team.values()
+        if team_fixtures and team_fixtures[0].get("jornada")
+    ]
+    if not jornadas:
+        return None
+    return Counter(jornadas).most_common(1)[0][0]
+
+
+def scrape_primer_partido_una_jornada(jornada):
+    """Saca el timestamp exacto (ms) del primer partido de UNA jornada concreta."""
+    url = f"https://www.analiticafantasy.com/alineaciones-probables/la-liga/temporada-2026/jornada-{jornada}"
+    try:
+        response = requests.get(url, headers=HEADERS, timeout=20)
+        response.raise_for_status()
+    except Exception as e:
+        print(f"❌ Error cargando alineaciones probables (jornada {jornada}): {e}")
+        return None
+
+    matches = re.findall(r"(\d{1,2})/(\d{1,2}),\s*(\d{1,2}):(\d{2})", response.text)
+    if not matches:
+        print(f"⚠️ No se encontraron fechas/horas de partidos en la jornada {jornada} (puede que aún no estén publicadas)")
+        return None
+
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    hoy = datetime.now()
+    fechas = []
+    for d, m, hh, mm in matches:
+        try:
+            d, m, hh, mm = int(d), int(m), int(hh), int(mm)
+            if not (1 <= d <= 31 and 1 <= m <= 12 and 0 <= hh <= 23 and 0 <= mm <= 59):
+                continue
+            anio = hoy.year if m >= hoy.month else hoy.year + 1
+            fecha = datetime(anio, m, d, hh, mm, tzinfo=ZoneInfo("Europe/Madrid"))
+        except ValueError:
+            continue
+        # Descartamos cualquier cosa que no caiga dentro de un mes desde hoy:
+        # un partido de la jornada actual/siguientes nunca debería estar más
+        # lejos que eso, así filtramos falsos positivos del patrón (menos
+        # anclado ahora que la web ya no pone "Fecha"/"hora" delante).
+        dias_diferencia = (fecha - hoy.replace(tzinfo=ZoneInfo("Europe/Madrid"))).days
+        if -3 <= dias_diferencia <= 31:
+            fechas.append(fecha)
+
+    if not fechas:
+        print(f"⚠️ No quedó ninguna fecha válida tras filtrar en la jornada {jornada}")
+        return None
+
+    primer_partido = min(fechas)
+    timestamp_ms = int(primer_partido.timestamp() * 1000)
+    print(f"✅ Primer partido de la jornada {jornada}: {primer_partido.strftime('%d/%m/%Y %H:%M')} (Madrid)")
+    return timestamp_ms
+
+
+def scrape_proximas_jornadas(fixtures_by_team, cuantas=4):
+    """Saca el primer partido de la jornada actual y de las 'cuantas'-1 siguientes."""
+    jornada_actual = determine_current_jornada(fixtures_by_team)
+    if not jornada_actual:
+        print("⚠️ No se pudo determinar la jornada actual, sin datos de jornadas esta vez")
+        return {}
+
+    jornadas = {}
+    for offset in range(cuantas):
+        j = jornada_actual + offset
+        ts = scrape_primer_partido_una_jornada(j)
+        if ts is not None:
+            jornadas[str(j)] = ts
+        time.sleep(0.5)
+
+    return jornadas
+
+
+def scrape_primer_partido_jornada(fixtures_by_team):
+    jornadas = scrape_proximas_jornadas(fixtures_by_team, cuantas=1)
+    jornada_actual = determine_current_jornada(fixtures_by_team)
+    return jornadas.get(str(jornada_actual)) if jornada_actual else None
+
+
+def save_fixtures(fixtures_by_team, primer_partido_ms=None, jornadas=None):
+    github_token = os.environ["FANTASY_DATA_TOKEN"]
+    data_repo = "alexronken99/fantasy-data"
+    api_base = f"https://api.github.com/repos/{data_repo}/contents"
+    headers = {
+        "Authorization": f"Bearer {github_token}",
+        "Accept": "application/vnd.github+json"
     }
-    .player-card.mkt-starred{background:rgba(227,168,59,0.16);}
-    .player-card .pc-top{display:flex; align-items:center; justify-content:space-between; gap:8px;}
-    .player-card .pc-name-wrap{display:flex; align-items:center; gap:6px; min-width:0;}
-    .player-card .pc-name{font-weight:600; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
-    .player-card .pc-actions{display:flex; gap:6px; flex:none;}
-    .player-card .pc-actions button{font-size:16px; padding:4px 8px; background:var(--pitch-deep); border:1px solid var(--pitch-line); border-radius:6px; color:var(--chalk-dim);}
-    .player-card .pc-grid{display:grid; grid-template-columns:1fr 1fr; gap:4px 10px; margin-top:8px; font-size:12px;}
-    .player-card .pc-grid .pc-label{color:var(--chalk-dim); font-size:10px; text-transform:uppercase; letter-spacing:0.03em;}
-    .player-card .track-btn{width:100%; margin-top:8px; padding:8px;}
 
-    thead th{font-size:13px; padding:6px 8px;}
-    td{padding:7px 8px;}
+    def get_sha(path):
+        r = requests.get(f"{api_base}/{path}", headers=headers, timeout=30)
+        return r.json()["sha"] if r.status_code == 200 else None
 
-    .modal{width:calc(100vw - 40px); max-width:340px; padding:18px;}
-    .modal input{font-size:16px;}
-    .overlay{padding:16px;}
+    content_dict = dict(fixtures_by_team)
+    if primer_partido_ms is not None:
+        content_dict["_primerPartidoJornada"] = primer_partido_ms
+    if jornadas:
+        content_dict["_jornadas"] = jornadas
 
-    .manager-slider{max-height:160px;}
+    content = base64.b64encode(json.dumps(content_dict).encode()).decode()
+    body = {"message": "update fixtures", "content": content}
+    sha = get_sha("fixtures.json")
+    if sha:
+        body["sha"] = sha
+    r = requests.put(f"{api_base}/fixtures.json", headers=headers, json=body, timeout=30)
+    r.raise_for_status()
+    print(f"✅ fixtures.json subido a fantasy-data ({len(fixtures_by_team)} equipos)")
 
-    .pitch-row{gap:8px;}
-    .pitch-card{min-width:72px; padding:6px 6px;}
-    .pitch-card .pname{font-size:10px;}
 
-    .tick-item{font-size:11px; margin-right:20px;}
-  }
-</style>
-</head>
-<body>
+def update_history(players):
+    from datetime import date
 
-<div class="ticker-wrap"><div class="ticker" id="ticker"><span class="tick-item name">Cargando movimientos del mercado…</span></div></div>
-
-<header>
-  <div class="brand">
-    <h1>Liga <span>Fantasy</span></h1>
-    <p>Liga de las Princesas · lloros asegurados</p>
-  </div>
-  <div class="status" id="statusBox">conectando con el mercado…</div>
-</header>
-
-<nav class="view-tabs" id="viewTabs">
-  <button data-view="jugadores" class="active">Jugadores</button>
-  <button data-view="mercado">Mercado</button>
-  <button data-view="equipos">Equipos</button>
-  <button data-view="once">Once</button>
-</nav>
-
-<div class="layout" id="viewJugadores">
-  <div class="main">
-    <div class="toolbar">
-      <input type="text" id="search" placeholder="Buscar jugador…" />
-      <input type="text" class="combo" id="posFilterInput" list="posOptions" placeholder="Posición…" />
-      <datalist id="posOptions">
-        <option value="Todas">
-        <option value="Portero">
-        <option value="Defensa">
-        <option value="Medio">
-        <option value="Delantero">
-        <option value="Entrenador">
-      </datalist>
-      <input type="text" class="combo" id="teamFilterInput" list="teamOptions" placeholder="Equipo…" />
-      <datalist id="teamOptions"></datalist>
-      <span class="count" id="rowCount"></span>
-    </div>
-    <div id="tableWrap"><div class="loading">Cargando jugadores desde la API…</div></div>
-  </div>
-</div>
-
-<div class="view-full" id="viewMercado" style="display:none;">
-  <div class="sub" style="margin-bottom:10px; color:var(--chalk-dim); font-size:13px;">Jugadores fichados (tuyos o de tus rivales) — valor, cláusula pagada y cuándo se liberan.</div>
-  <div class="toolbar">
-    <input type="text" id="searchMkt" placeholder="Buscar jugador…" />
-    <input type="text" class="combo" id="posFilterInputMkt" list="posOptions" placeholder="Posición…" />
-    <input type="text" class="combo" id="teamFilterInputMkt" list="teamOptions" placeholder="Equipo…" />
-    <input type="text" class="combo" id="managerFilterInput" list="managerOptions" placeholder="Manager…" />
-    <datalist id="managerOptions"></datalist>
-    <button class="btn-secondary" id="filtroLibresBtn" style="width:auto; padding:10px 14px;" title="Solo jugadores libres o por confirmar">🔓 Libres</button>
-    <button class="btn-secondary" id="filtroPendientesBtn" style="width:auto; padding:10px 14px;" title="Solo jugadores todavía protegidos por cláusula">🔒 Protegidos</button>
-    <button class="btn-secondary" id="resyncBtn" style="width:auto; padding:10px 14px;" title="Sube de nuevo todo lo que ya tienes en Mercado al puente de Telegram">🔄 Resincronizar</button>
-  </div>
-  <div id="mercadoWrap"><div class="empty-radar">Aún no sigues ninguna cláusula. Pulsa "Marcar" en un jugador de la pestaña Jugadores.</div></div>
-</div>
-
-<div class="view-full" id="viewEquipos" style="display:none;">
-  <div class="sub" style="margin-bottom:10px; color:var(--chalk-dim); font-size:13px;">Valor y tendencia de la plantilla de cada manager de tu liga (tú y tus rivales), según lo que marques en Mercado.</div>
-  <div id="equiposWrap"></div>
-</div>
-
-<div class="view-full" id="viewOnce" style="display:none;">
-  <div class="sub" style="margin-bottom:10px; color:var(--chalk-dim); font-size:13px;">Once recomendado para <b style="color:var(--chalk);">La Pimienta FC</b>, calculado sobre los jugadores que marques en Mercado a tu nombre — se recalcula solo según vayas añadiendo más.</div>
-  <div id="onceWrap"></div>
-</div>
-
-<div class="overlay" id="overlay">
-  <div class="modal">
-    <h3 id="mpName">Jugador</h3>
-    <p class="mp-team" id="mpTeam"></p>
-    <label>Manager (rival o tú mismo)</label>
-    <div class="manager-slider" id="mpRivalSlider"></div>
-    <input type="hidden" id="mpRival" />
-    <label>Fecha y hora de la operación</label>
-    <input type="datetime-local" id="mpDate" />
-    <label>Cláusula pagada (opcional, €)</label>
-    <input type="text" id="mpClause" placeholder="p. ej. 4.2 (= 4.200.000€)" />
-    <div class="modal-actions">
-      <button class="btn-secondary" id="mpCancel">Cancelar</button>
-      <button class="btn-primary" id="mpSave">Guardar</button>
-    </div>
-  </div>
-</div>
-
-<div class="overlay" id="editOverlay">
-  <div class="modal">
-    <h3 id="editName">Jugador</h3>
-    <p class="mp-team" id="editInfo"></p>
-    <div class="modal-actions" style="margin-top:0; margin-bottom:16px; flex-wrap:wrap;">
-      <button class="btn-secondary" id="editModeRaise" style="flex:1;">Subir cláusula</button>
-      <button class="btn-secondary" id="editModeTransfer" style="flex:1;">Transferir</button>
-      <button class="btn-secondary" id="editModeSell" style="flex:1;">Vender al mercado</button>
-      <button class="btn-secondary" id="editModeBlindar" style="flex:1; display:none;">Blindar (48h)</button>
-    </div>
-    <div id="editRaiseFields">
-      <label>Nueva cláusula (€)</label>
-      <input type="text" id="raiseAmount" placeholder="p. ej. 40 (= 40.000.000€)" />
-    </div>
-    <div id="editTransferFields" style="display:none;">
-      <label>Nuevo manager</label>
-      <div class="manager-slider" id="transferManagerSlider"></div>
-      <input type="hidden" id="transferManager" />
-      <label>Nueva cláusula (€)</label>
-      <input type="text" id="transferClause" placeholder="p. ej. 12 (= 12.000.000€)" />
-      <label>Fecha y hora de la operación</label>
-      <input type="datetime-local" id="transferDate" />
-    </div>
-    <div id="editSellFields" style="display:none;">
-      <p class="mp-team" style="margin-top:12px;">Se dejará de seguir a este jugador (vuelve a ser libre, ya no lo tiene ningún manager).</p>
-    </div>
-    <div id="editBlindarFields" style="display:none;">
-      <p class="mp-team" style="margin-top:12px;">El jugador queda protegido 48 horas desde la fecha y hora que indiques. Mientras dure esa protección, no se podrá volver a blindar.</p>
-      <label>Fecha y hora del blindaje</label>
-      <input type="datetime-local" id="blindarDate" />
-    </div>
-    <div class="modal-actions">
-      <button class="btn-secondary" id="editCancel">Cancelar</button>
-      <button class="btn-primary" id="editSave">Guardar</button>
-    </div>
-  </div>
-</div>
-
-<div class="overlay" id="conflictOverlay">
-  <div class="modal">
-    <button id="conflictClose" style="position:absolute; top:14px; right:16px; background:none; border:none; color:var(--chalk-dim); font-size:18px; cursor:pointer;">✕</button>
-    <h3 id="conflictName">Jugador</h3>
-    <p class="mp-team" id="conflictInfo"></p>
-    <label>Cláusula (€)</label>
-    <input type="text" id="conflictClause" placeholder="p. ej. 4.2 (= 4.200.000€)" />
-    <label>Fecha y hora del fichaje</label>
-    <input type="datetime-local" id="conflictDate" />
-    <div class="modal-actions">
-      <button class="btn-secondary" id="conflictCancel">Cancelar</button>
-      <button class="btn-primary" id="conflictSave">Actualizar</button>
-    </div>
-  </div>
-</div>
-
-<script>
-const TEAMS = {2:"ATM",3:"ATH",4:"BAR",5:"BET",6:"CEL",7:"ELC",8:"ESP",9:"GET",11:"LEV",13:"OSA",14:"RAY",15:"RMA",16:"RSO",17:"SEV",18:"VAL",20:"VIL",21:"ALA",28:"GIR",33:"MLL",157:"OVI"};
-const POSITIONS = {1:"Portero",2:"Defensa",3:"Medio",4:"Delantero",5:"Entrenador"};
-const POS_ORDER = [1,2,3,4,5];
-const STATUS_LABEL = {injured:"Lesionado", doubtful:"Duda", suspended:"Sancionado", out_of_league:"Fuera de liga"};
-
-let players = [];
-let prevSnapshot = {};
-let currentPos = "all";
-let posFilterText = "";
-let teamFilterText = "";
-let managerFilterText = "";
-
-const POSITION_COLORS = {
-  1:{bg:"#E3A83B", fg:"#1a1a1a"},
-  2:{bg:"#8B5CF6", fg:"#ffffff"},
-  3:{bg:"#3B82F6", fg:"#ffffff"},
-  4:{bg:"#F5D90A", fg:"#1a1a1a"},
-  5:{bg:"#FFFFFF", fg:"#1a1a1a"}
-};
-
-const MANAGER_COLORS = {
-  "La Pimienta FC": {bg:"#F5D90A", fg:"#1a1a1a"},
-  "JuanNB3 C.F.": {bg:"#111111", fg:"#ffffff"},
-  "La Cárcel C.F.": {bg:"#DC2626", fg:"#ffffff"},
-  "DLuqueG": {bg:"#FFFFFF", fg:"#1a1a1a"},
-  "aramos07": {bg:"#3B82F6", fg:"#ffffff"},
-  "FDiaz CF": {bg:"#22C55E", fg:"#1a1a1a"},
-  "Bordalás y Cuchillo": {bg:"#8B5E34", fg:"#ffffff"},
-  "Adri Amoros 8896": {bg:"#8B5CF6", fg:"#ffffff"},
-  "Crodrical C.F": {bg:"#F97316", fg:"#ffffff"}
-};
-
-const TEAM_CREST_ID = {"BAR":529,"RMA":541,"VIL":533,"ATM":530,"BET":543,"CEL":538,"GET":546,"RAY":728,"VAL":532,"RSO":548,"ESP":540,"ATH":531,"SEV":536,"ALA":542,"ELC":797,"LEV":539,"OSA":727,"RAC":4665,"DEP":544,"MAL":535};
-const TEAM_NAME_TO_CREST_ID = {"Barcelona":529,"Real Madrid":541,"Villarreal":533,"Atlético":530,"Atletico Madrid":530,"Real Betis":543,"Betis":543,"Celta":538,"Getafe":546,"Rayo":728,"Rayo Vallecano":728,"Valencia":532,"Real Sociedad":548,"Espanyol":540,"Athletic":531,"Athletic Club":531,"Sevilla":536,"Alavés":542,"Elche":797,"Levante":539,"Osasuna":727,"Racing":4665,"Racing Santander":4665,"Deportivo":544,"Deportivo La Coruna":544,"Málaga":535,"Malaga":535};
-
-const MANAGER_LIST = Object.keys(MANAGER_COLORS);
-
-function buildManagerChips(containerId, hiddenInputId, currentValue){
-  const container = document.getElementById(containerId);
-  container.innerHTML = MANAGER_LIST.map(name => {
-    const c = MANAGER_COLORS[name];
-    const sel = name === currentValue ? " selected" : "";
-    return `<span class="manager-chip mgr-badge${sel}" data-name="${name}" style="background:${c.bg};color:${c.fg};">${name}</span>`;
-  }).join("");
-  container.querySelectorAll(".manager-chip").forEach(chip => {
-    chip.onclick = () => {
-      container.querySelectorAll(".manager-chip").forEach(c => c.classList.remove("selected"));
-      chip.classList.add("selected");
-      document.getElementById(hiddenInputId).value = chip.dataset.name;
-    };
-  });
-}
-
-function teamCrest(teamAbbr){
-  if(!teamAbbr) return `<span class="pteam">—</span>`;
-  const id = TEAM_CREST_ID[teamAbbr] || TEAM_NAME_TO_CREST_ID[teamAbbr];
-  if(!id) return `<span class="pteam">${teamAbbr}</span>`;
-  return `<img src="https://assets.analiticafantasy.com/equipos/${id}.png" alt="${teamAbbr}" title="${teamAbbr}" class="team-crest" onerror="this.outerHTML='&lt;span class=&quot;pteam&quot;&gt;${teamAbbr}&lt;/span&gt;'">`;
-}
-
-function posBadge(positionId){
-  const c = POSITION_COLORS[positionId] || {bg:"#5a5a5a", fg:"#ffffff"};
-  const label = POSITIONS[positionId] || "—";
-  return `<span class="pos-badge" style="background:${c.bg}22;color:${c.bg};border:1.5px solid ${c.bg};">${label}</span>`;
-}
-
-function managerBadge(name){
-  const c = MANAGER_COLORS[name];
-  if(!c) return `<span class="pos-badge" style="background:#5a5a5a;color:#fff;">${name}</span>`;
-  return `<span class="mgr-badge" style="background:${c.bg};color:${c.fg};">${name}</span>`;
-}
-
-function populateFilterOptions(){
-  const teamSet = Array.from(new Set(players.map(p => p.teamAbbr).filter(Boolean))).sort();
-  const teamList = document.getElementById("teamOptions");
-  teamList.innerHTML = teamSet.map(t => `<option value="${t}">`).join("");
-
-  const managerSet = Array.from(new Set(radarEntries.map(e => e.rival).filter(Boolean))).sort();
-  const managerList = document.getElementById("managerOptions");
-  managerList.innerHTML = managerSet.map(m => `<option value="${m}">`).join("");
-}
-
-function matchesPos(positionId){
-  if(!posFilterText || posFilterText.toLowerCase() === "todas") return true;
-  const label = (POSITIONS[positionId] || "").toLowerCase();
-  return label.includes(posFilterText.toLowerCase());
-}
-
-function matchesTeam(teamAbbr){
-  if(!teamFilterText) return true;
-  return (teamAbbr || "").toLowerCase().includes(teamFilterText.toLowerCase());
-}
-
-function matchesManager(name){
-  if(!managerFilterText) return true;
-  return (name || "").toLowerCase().includes(managerFilterText.toLowerCase());
-}
-let jugSortKey = "value";
-let jugSortDir = -1;
-let mktSortKey = null;
-let mktSortDir = 1;
-
-function sortArrow(key, activeKey, dir){
-  if(key !== activeKey) return "";
-  return dir === 1 ? " ▲" : " ▼";
-}
-let searchTerm = "";
-let searchTermMkt = "";
-let mktEstadoFilter = null; // null | "libre" | "pendiente"
-let radarEntries = [];
-let starredPlayers = new Set();
-let currentView = "jugadores";
-
-function fmtEuro(n){
-  if(n==null) return "—";
-  return "€" + Number(n).toLocaleString("es-ES");
-}
-
-function nowLocalDatetime(){
-  const d = new Date();
-  const pad = n => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-function msToLocalDatetimeInput(ms){
-  if(!ms) return "";
-  const d = new Date(Number(ms));
-  if(isNaN(d)) return "";
-  const pad = n => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-function todayAt1442(){
-  const d = new Date();
-  const pad = n => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T14:42`;
-}
-
-function parseEuroInput(str){
-  if(!str) return null;
-  const normalized = String(str).replace(",", ".").trim();
-  const num = parseFloat(normalized);
-  if(isNaN(num)) return null;
-  return Math.round(num * 1000000);
-}
-
-function toMillionsInput(n){
-  if(n == null) return "";
-  return String(n / 1000000);
-}
-
-function fechaLabelFor(fecha){
-  const d = new Date(fecha);
-  if(isNaN(d)) return "—";
-  const pad = n => String(n).padStart(2, "0");
-  return `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-const PROTECCION_NORMAL_MS = 14 * 24 * 60 * 60 * 1000;
-const PROTECCION_BLINDAJE_MS = 48 * 60 * 60 * 1000;
-
-function mktMsRestantes(e){
-  const compra = new Date(e.fecha);
-  const duracion = e.proteccionMs || PROTECCION_NORMAL_MS;
-  const liberaEn = new Date(compra.getTime() + duracion);
-  return liberaEn - new Date();
-}
-
-function liberaLabelFor(e){
-  const ms = mktMsRestantes(e);
-  if(ms <= 0){
-    if(e.confirmado) return "Libre";
-    return `<span class="limbo-label">⚠️ Por confirmar</span><br>Libre`;
-  }
-  const esBlindaje = e.proteccionMs === PROTECCION_BLINDAJE_MS;
-  const prefix = esBlindaje ? "🛡️ " : "";
-  const totalMinutes = Math.floor(ms / 60000);
-  if(totalMinutes < 48 * 60){
-    const h = Math.floor(totalMinutes / 60);
-    const m = totalMinutes % 60;
-    return `${prefix}${h}h ${m}min`;
-  }
-  return prefix + Math.ceil(ms / 86400000) + " días";
-}
-
-const DATA_REPO_BASE = "https://raw.githubusercontent.com/alexronken99/fantasy-data/main";
-
-const SEGUIMIENTO_BRIDGE_URL = "https://script.google.com/macros/s/AKfycbw5ZwDQxxavcur3oIEfI-ZJK_DxpfH88McuGuhvu0GoBnXWyGEQB6nNK_PJkUeoxI0/exec";
-
-async function syncSeguimiento(action, entry){
-  try{
-    await fetch(SEGUIMIENTO_BRIDGE_URL, {
-      method: "POST",
-      mode: "no-cors",
-      headers: {"Content-Type": "text/plain;charset=utf-8"},
-      body: JSON.stringify({
-        action,
-        key: entry.key,
-        jugador: entry.nombre,
-        manager: entry.rival,
-        fecha: new Date(entry.fecha).getTime(),
-        playerId: entry.playerId,
-        clausula: entry.clausula,
-        valorAlFichar: entry.valorAlFichar,
-        confirmado: !!entry.confirmado,
-        proteccionMs: entry.proteccionMs || null
-      })
-    });
-  }catch(e){ /* fallo silencioso: no debe romper el uso normal del dashboard */ }
-}
-
-function syncSeguimientoReset(){
-  try{
-    fetch(SEGUIMIENTO_BRIDGE_URL, {
-      method: "POST",
-      mode: "no-cors",
-      headers: {"Content-Type": "text/plain;charset=utf-8"},
-      body: JSON.stringify({action: "reset"})
-    });
-  }catch(e){}
-}
-
-async function resyncAllSeguimiento(){
-  try{
-    await fetch(SEGUIMIENTO_BRIDGE_URL, {
-      method: "POST",
-      mode: "no-cors",
-      headers: {"Content-Type": "text/plain;charset=utf-8"},
-      body: JSON.stringify({
-        action: "bulk",
-        entries: radarEntries.map(entry => ({
-          key: entry.key,
-          jugador: entry.nombre,
-          manager: entry.rival,
-          fecha: new Date(entry.fecha).getTime(),
-          playerId: entry.playerId,
-          clausula: entry.clausula,
-          valorAlFichar: entry.valorAlFichar,
-          confirmado: !!entry.confirmado,
-          proteccionMs: entry.proteccionMs || null
-        }))
-      })
-    });
-  }catch(e){}
-}
-
-async function loadStorage(){
-  try{
-    const bridgeData = await fetchJsonWithFallback(SEGUIMIENTO_BRIDGE_URL);
-    radarEntries = bridgeData.map(e => ({
-      key: e.key,
-      playerId: e.playerId,
-      nombre: e.jugador,
-      rival: e.manager,
-      fecha: Number(e.fecha),
-      clausula: e.clausula != null && e.clausula !== "" ? Number(e.clausula) : null,
-      valorAlFichar: e.valorAlFichar != null && e.valorAlFichar !== "" ? Number(e.valorAlFichar) : null,
-      confirmado: e.confirmado === true || e.confirmado === "true" || e.confirmado === 1,
-      proteccionMs: e.proteccionMs != null && e.proteccionMs !== "" ? Number(e.proteccionMs) : null
-    }));
-    await saveRadar(); // refresca la copia local con lo último del puente
-  }catch(e){
-    try{
-      radarEntries = JSON.parse(localStorage.getItem("radar_entries") || "[]");
-    }catch(e2){ radarEntries = []; }
-  }
-}
-
-async function saveRadar(){
-  try{ localStorage.setItem("radar_entries", JSON.stringify(radarEntries)); }catch(e){}
-}
-
-async function loadStarred(){
-  try{
-    const arr = JSON.parse(localStorage.getItem("starred_players") || "[]");
-    starredPlayers = new Set(arr.map(String));
-  }catch(e){ starredPlayers = new Set(); }
-}
-
-function saveStarred(){
-  try{ localStorage.setItem("starred_players", JSON.stringify(Array.from(starredPlayers))); }catch(e){}
-}
-
-function isStarred(playerId){
-  return starredPlayers.has(String(playerId));
-}
-
-function toggleStar(playerId){
-  const key = String(playerId);
-  if(starredPlayers.has(key)) starredPlayers.delete(key);
-  else starredPlayers.add(key);
-  saveStarred();
-  renderMercadoView();
-}
-
-const syncingKeys = new Set();
-
-async function confirmSinCambios(key){
-  if(syncingKeys.has(key)) return; // ya se está procesando, ignora el clic repetido
-  syncingKeys.add(key);
-  try{
-    const entry = radarEntries.find(e => e.key === key);
-    if(!entry) return;
-    entry.confirmado = true;
-    await syncSeguimiento("update", entry);
-    await saveRadar();
-    renderMercadoView();
-  } finally {
-    syncingKeys.delete(key);
-  }
-}
-
-function checkClauseAlerts(){
-  if(!("Notification" in window)) return;
-  const today = new Date();
-  const todayKey = today.toISOString().slice(0,10);
-  let notified = {};
-  try{ notified = JSON.parse(localStorage.getItem("notified_map") || "{}"); }catch(e){ notified = {}; }
-
-  const due = radarEntries.filter(e => {
-    const compra = new Date(e.fecha);
-    const liberaEn = new Date(compra); liberaEn.setDate(liberaEn.getDate() + 14);
-    const diasRestantes = Math.ceil((liberaEn - today) / 86400000);
-    return diasRestantes <= 1 && notified[e.key] !== todayKey;
-  });
-  if(due.length === 0) return;
-
-  const fire = () => {
-    due.forEach(e => {
-      new Notification("Cláusula a punto de liberarse", {
-        body: `${e.nombre} (fichado por ${e.rival}) se libera en 1 día o menos.`,
-        icon: "https://assets-fantasy.llt-services.com/players/no-player/no-player-sq_256.png"
-      });
-      notified[e.key] = todayKey;
-    });
-    try{ localStorage.setItem("notified_map", JSON.stringify(notified)); }catch(e){}
-  };
-
-  if(Notification.permission === "granted"){
-    fire();
-  } else if(Notification.permission !== "denied"){
-    Notification.requestPermission().then(perm => { if(perm === "granted") fire(); });
-  }
-}
-
-async function loadPrevSnapshot(){
-  // "previous.json" = snapshot del día anterior al último subido por el script de GitHub.
-  // Si aún no existe (primer día), usamos "latest.json" como referencia (tendencia saldrá en 0 hasta mañana).
-  try{
-    prevSnapshot = await fetchJsonWithFallback(`${DATA_REPO_BASE}/previous.json`);
-  }catch(e){
-    try{
-      prevSnapshot = await fetchJsonWithFallback(`${DATA_REPO_BASE}/latest.json`);
-    }catch(e2){
-      prevSnapshot = {date:null, values:{}};
+    github_token = os.environ["FANTASY_DATA_TOKEN"]
+    data_repo = "alexronken99/fantasy-data"
+    api_base = f"https://api.github.com/repos/{data_repo}/contents"
+    headers = {
+        "Authorization": f"Bearer {github_token}",
+        "Accept": "application/vnd.github+json"
     }
-  }
-}
-
-function trendFor(p){
-  let prevVal = p.prevValue;
-  if(prevVal == null){
-    const entry = prevSnapshot.values ? prevSnapshot.values[p.id] : null;
-    prevVal = entry && typeof entry === "object" ? entry.value : entry;
-  }
-  if(prevVal == null || prevVal === 0) return {diff:0, dir:"flat"};
-  const diff = p.marketValue - prevVal;
-  return {diff, dir: diff > 0 ? "up" : diff < 0 ? "down" : "flat"};
-}
-
-async function fetchJsonWithFallback(targetUrl){
-  const attempts = [
-    targetUrl,
-    "https://api.allorigins.win/raw?url=" + encodeURIComponent(targetUrl),
-    "https://corsproxy.io/?url=" + encodeURIComponent(targetUrl),
-    "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(targetUrl)
-  ];
-  let lastErr;
-  for(const url of attempts){
-    try{
-      const res = await fetch(url, {cache:"no-store"});
-      if(!res.ok) throw new Error("HTTP " + res.status);
-      const text = await res.text();
-      return JSON.parse(text);
-    }catch(e){ lastErr = e; }
-  }
-  throw lastErr || new Error("No se pudo conectar por ninguna vía");
-}
-
-function normalizeName(name){
-  if(!name) return "";
-  return name
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-const POSITION_NAME_TO_ID = {"Portero":1,"Defensa":2,"Medio":3,"Delantero":4,"Entrenador":5};
-
-async function fetchPlayers(){
-  const latest = await fetchJsonWithFallback(`${DATA_REPO_BASE}/latest.json`);
-  const values = latest.values || {};
-
-  players = Object.keys(values).map(key => {
-    const v = values[key];
-    const entry = (v && typeof v === "object") ? v : {value: v};
-    return {
-      id: key,
-      nickname: entry.name || key,
-      positionId: POSITION_NAME_TO_ID[entry.position] || 0,
-      teamAbbr: entry.team || "—",
-      marketValue: Number(entry.value),
-      prevValue: entry.prevValue != null ? Number(entry.prevValue) : null,
-      startProb: entry.probabilidad != null ? Number(entry.probabilidad) : null,
-      points: null,
-      averagePoints: null,
-      playerStatus: entry.estado || null
-    };
-  });
-}
-
-function jugColumnValue(p, key, ratio){
-  switch(key){
-    case "name": return p.nickname.toLowerCase();
-    case "team": return (p.teamAbbr||"").toLowerCase();
-    case "pos": return p.positionId;
-    case "value": return p.marketValue;
-    case "trend": return trendFor(p).diff;
-    case "points": return p.points || 0;
-    case "avg": return p.averagePoints || 0;
-    case "sugerida": return ratio ? p.marketValue * ratio.avg : 0;
-    case "titular": return p.startProb != null ? p.startProb : -1;
-    case "rival": { const nf = nextFixtureFor(p.teamAbbr); return nf ? (nf.dificultad||0) : -1; }
-    default: return 0;
-  }
-}
-
-function sortPlayers(list, ratio){
-  const key = jugSortKey, dir = jugSortDir;
-  return list.slice().sort((a,b) => {
-    const va = jugColumnValue(a, key, ratio), vb = jugColumnValue(b, key, ratio);
-    if(va < vb) return -1 * dir;
-    if(va > vb) return 1 * dir;
-    return 0;
-  });
-}
-
-let fixturesByTeam = {};
-let jornadasLock = {}; // {numJornada: timestampBloqueo (24h antes del 1er partido)}
-
-async function loadFixtures(){
-  try{
-    fixturesByTeam = await fetchJsonWithFallback(`${DATA_REPO_BASE}/fixtures.json`);
-    const jornadasRaw = fixturesByTeam._jornadas || {};
-    jornadasLock = {};
-    Object.keys(jornadasRaw).forEach(j => {
-      jornadasLock[j] = Number(jornadasRaw[j]) - 24*3600000;
-    });
-  }catch(e){
-    fixturesByTeam = {};
-    jornadasLock = {};
-  }
-}
-
-function jornadaStatusFor(e){
-  const numerosJornada = Object.keys(jornadasLock).map(Number).sort((a,b) => a-b);
-  if(numerosJornada.length === 0) return null; // sin datos todavía
-
-  const liberaEnMs = new Date(e.fecha).getTime() + (e.proteccionMs || PROTECCION_NORMAL_MS);
-
-  // Buscamos la primera jornada (de las que tenemos datos) cuyo bloqueo ya
-  // haya pasado la liberación del jugador — a partir de ahí queda libre/robable.
-  const primeraVulnerable = numerosJornada.find(j => liberaEnMs <= jornadasLock[j]);
-
-  if(primeraVulnerable == null){
-    // Sigue protegido más allá de todas las jornadas que conocemos
-    const ultima = numerosJornada[numerosJornada.length - 1];
-    return {
-      seguro: true,
-      text: `🔒 Seguro hasta J${ultima}+`,
-      cls: "diff-pos",
-      title: `Sigue protegido incluso en el bloqueo de la jornada ${ultima} (la última que tenemos calculada)`
-    };
-  }
-
-  return {
-    seguro: false,
-    text: `⚠️ Libre desde J${primeraVulnerable}`,
-    cls: "diff-neg",
-    title: `Se libera antes del bloqueo de plantillas de la jornada ${primeraVulnerable}: robable a partir de esa jornada (incluida)`
-  };
-}
-
-function nextFixtureFor(teamAbbr){
-  const list = fixturesByTeam[teamAbbr];
-  if(!list || list.length === 0) return null;
-  return list[0];
-}
-
-function difficultyLabel(d){
-  if(d == null) return {text:"—", cls:""};
-  const map = {1:["Muy baja","diff-pos"],2:["Baja","diff-pos"],3:["Media",""],4:["Alta","diff-neg"],5:["Muy alta","diff-neg"]};
-  return {text: (map[d] ? map[d][0] : "—"), cls: (map[d] ? map[d][1] : "")};
-}
-
-function startProbLabel(prob){
-  if(prob == null) return `<span class="ppts">—</span>`;
-  const cls = prob >= 70 ? "diff-pos" : prob >= 40 ? "" : "diff-neg";
-  return `<span class="${cls}">${prob}%</span>`;
-}
-
-function learnedBidRatio(){
-  const withData = radarEntries.filter(e => e.clausula && e.valorAlFichar);
-  if(withData.length === 0) return null;
-  const ratios = withData.map(e => e.clausula / e.valorAlFichar);
-  const avg = ratios.reduce((a,b)=>a+b, 0) / ratios.length;
-  return {avg, count: withData.length};
-}
-
-function renderTable(){
-  let list = players.filter(p => matchesPos(p.positionId) && matchesTeam(p.teamAbbr));
-  if(searchTerm){
-    const s = normalizeName(searchTerm);
-    list = list.filter(p => normalizeName(p.nickname).includes(s));
-  }
-  const ratio = learnedBidRatio();
-  list = sortPlayers(list, ratio);
-  document.getElementById("rowCount").textContent = list.length + " jugadores" + (ratio ? ` · puja sugerida basada en ${ratio.count} operación(es) de tu liga` : " · puja sugerida: registra cláusulas en Mercado para activarla");
-
-  const cols = [
-    ["name","Jugador"], ["team","Equipo"], ["pos","Posición"], ["value","Valor"], ["trend","Tendencia"], ["sparkline","Últimos días"],
-    ["points","Puntos"], ["avg","Media"], ["sugerida","Puja sugerida"], ["titular","Titular"], ["rival","Próx. rival"]
-  ];
-  let html = "<table><thead><tr>" + cols.map(([key,label]) =>
-    `<th data-sort-key="${key}" data-table="jug">${label}${sortArrow(key, jugSortKey, jugSortDir)}</th>`
-  ).join("") + "<th></th></tr></thead><tbody>";
-  let cardsHtml = "";
-  list.slice(0, 300).forEach(p => {
-    const t = trendFor(p);
-    const arrow = t.dir === "up" ? "▲" : t.dir === "down" ? "▼" : "＝";
-    const statusFlag = STATUS_LABEL[p.playerStatus] ? `<span class="status-flag status-${p.playerStatus}">${STATUS_LABEL[p.playerStatus]}</span>` : "";
-    const sugerida = ratio ? fmtEuro(Math.round(p.marketValue * ratio.avg)) : "—";
-    const nf = nextFixtureFor(p.teamAbbr);
-    let rivalCell = "—";
-    if(nf){
-      const dl = difficultyLabel(nf.dificultad);
-      const homeIcon = nf.local ? "🏠" : "✈️";
-      rivalCell = `${homeIcon} ${teamCrest(nf.rival)} <span class="${dl.cls}">(${dl.text})</span>`;
-    }
-    html += `<tr>
-      <td><span class="pname">${p.nickname}</span>${statusFlag}</td>
-      <td>${teamCrest(p.teamAbbr)}</td>
-      <td>${posBadge(p.positionId)}</td>
-      <td class="pval">${fmtEuro(p.marketValue)}</td>
-      <td class="trend ${t.dir}">${arrow} ${t.diff !== 0 ? fmtEuro(Math.abs(t.diff)) : "sin datos previos"}</td>
-      <td>${sparklineSVG(p.id)}</td>
-      <td class="ppts">${p.points ?? "—"}</td>
-      <td class="ppts">${p.averagePoints ? p.averagePoints.toFixed(2) : "—"}</td>
-      <td class="pval">${sugerida}</td>
-      <td>${startProbLabel(p.startProb)}</td>
-      <td class="ppts">${rivalCell}</td>
-      <td><button class="track-btn" data-id="${p.id}">Marcar</button></td>
-    </tr>`;
-
-    cardsHtml += `<div class="player-card">
-      <div class="pc-top">
-        <div class="pc-name-wrap">${teamCrest(p.teamAbbr)}<span class="pc-name">${p.nickname}</span>${statusFlag}</div>
-        ${posBadge(p.positionId)}
-      </div>
-      <div class="pc-grid">
-        <div><span class="pc-label">Valor</span><br>${fmtEuro(p.marketValue)}</div>
-        <div><span class="pc-label">Tendencia</span><br><span class="trend ${t.dir}">${arrow} ${t.diff !== 0 ? fmtEuro(Math.abs(t.diff)) : "—"}</span></div>
-        <div><span class="pc-label">Titular</span><br>${startProbLabel(p.startProb)}</div>
-        <div><span class="pc-label">Próx. rival</span><br>${rivalCell}</div>
-        <div style="grid-column:1 / -1;"><span class="pc-label">Últimos días</span><br>${sparklineSVG(p.id)}</div>
-      </div>
-      <button class="track-btn" data-id="${p.id}">Marcar</button>
-    </div>`;
-  });
-  html += "</tbody></table>";
-  const jugSortButtonsCols = [["value","Valor"], ["trend","Tendencia"], ["titular","Titular"], ["sugerida","Puja sugerida"], ["rival","Próx. rival"]];
-  const jugSortButtonsHtml = `<div class="sort-buttons">${jugSortButtonsCols.map(([k,label]) =>
-    `<button data-sort-key="${k}" class="${jugSortKey === k ? 'active' : ''}">${label}${sortArrow(k, jugSortKey, jugSortDir)}</button>`
-  ).join("")}</div>`;
-  document.getElementById("tableWrap").innerHTML = html + `<div class="player-cards">${jugSortButtonsHtml}${cardsHtml}</div>`;
-
-  document.querySelectorAll(".track-btn").forEach(btn => {
-    btn.onclick = () => openModal(btn.dataset.id);
-  });
-  document.querySelectorAll('#tableWrap th[data-sort-key]').forEach(th => {
-    th.onclick = () => {
-      const key = th.dataset.sortKey;
-      if(jugSortKey === key){ jugSortDir = jugSortDir === 1 ? -1 : 1; }
-      else { jugSortKey = key; jugSortDir = 1; }
-      renderTable();
-    };
-  });
-  document.querySelectorAll('#tableWrap .sort-buttons button').forEach(btn => {
-    btn.onclick = () => {
-      const key = btn.dataset.sortKey;
-      if(jugSortKey === key){ jugSortDir = jugSortDir === 1 ? -1 : 1; }
-      else { jugSortKey = key; jugSortDir = 1; }
-      renderTable();
-    };
-  });
-}
-
-function ringSVG(pct, color){
-  const r = 24, c = 2*Math.PI*r;
-  const offset = c * (1-pct);
-  return `<svg width="56" height="56"><circle cx="28" cy="28" r="${r}" stroke="rgba(233,236,229,0.12)" stroke-width="5" fill="none"/>
-  <circle cx="28" cy="28" r="${r}" stroke="${color}" stroke-width="5" fill="none" stroke-dasharray="${c}" stroke-dashoffset="${offset}" stroke-linecap="round"/></svg>`;
-}
-
-let historyByPlayer = {};
-
-async function loadHistory(){
-  try{
-    historyByPlayer = await fetchJsonWithFallback(`${DATA_REPO_BASE}/history.json`);
-  }catch(e){
-    historyByPlayer = {};
-  }
-}
-
-function sparklineSVG(playerId){
-  const hist = historyByPlayer[playerId];
-  if(!hist || hist.length < 2) return `<span class="ppts" style="font-size:10px;">sin histórico</span>`;
-
-  const deltas = [];
-  for(let i = 1; i < hist.length; i++){
-    deltas.push(hist[i].value - hist[i-1].value);
-  }
-  const maxAbs = Math.max(...deltas.map(d => Math.abs(d)), 1);
-  const barW = 9, gap = 3, h = 26;
-  const totalW = deltas.length * (barW + gap) - gap;
-
-  let bars = '';
-  deltas.forEach((d, i) => {
-    const barH = Math.max(2, Math.round((Math.abs(d) / maxAbs) * (h/2 - 3)));
-    const x = i * (barW + gap);
-    const color = d > 0 ? "#5BC17A" : d < 0 ? "#D9574A" : "#9FB3A8";
-    const y = d >= 0 ? (h/2 - barH) : (h/2);
-    bars += `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" fill="${color}" rx="1.5"/>`;
-  });
-
-  return `<svg width="${totalW}" height="${h}" style="vertical-align:middle;" title="Últimos ${deltas.length} días (izq. = más antiguo)">
-    <line x1="0" y1="${h/2}" x2="${totalW}" y2="${h/2}" stroke="rgba(233,236,229,0.15)" stroke-width="1"/>
-    ${bars}
-  </svg>`;
-}
-
-function weeklyTrend(p){
-  const hist = historyByPlayer[p.id];
-  if(!hist || hist.length < 2) return trendFor(p).diff; // sin historial suficiente, usamos el de un día
-  const deltas = [];
-  for(let i = 1; i < hist.length; i++){
-    deltas.push(hist[i].value - hist[i-1].value);
-  }
-  return deltas.reduce((a,b)=>a+b, 0) / deltas.length;
-}
-
-function clausulazoScore(entry, player){
-  if(!entry.clausula || !player || !player.marketValue) return null;
-  const tendenciaDiaria = weeklyTrend(player);
-  const proyeccion14dias = player.marketValue + (tendenciaDiaria * 14); // si la media de los últimos días se mantiene
-  return ((proyeccion14dias - entry.clausula) / entry.clausula) * 100;
-}
-
-function clausulazoLabel(score){
-  if(score == null) return {text:"—", cls:""};
-  const cls = score >= 0 ? "diff-pos" : "diff-neg";
-  const text = (score >= 0 ? "+" : "") + score.toFixed(0) + "%";
-  return {text, cls};
-}
-
-function mktColumnValue(e, player, key){
-  switch(key){
-    case "name": return (player ? player.nickname : e.nombre).toLowerCase();
-    case "team": return (player ? player.teamAbbr : "").toLowerCase();
-    case "pos": return player ? player.positionId : 99;
-    case "manager": return (e.rival||"").toLowerCase();
-    case "value": return player ? player.marketValue : -Infinity;
-    case "trend": return player ? trendFor(player).diff : 0;
-    case "clausula": return e.clausula || 0;
-    case "diff": return (player && e.clausula) ? e.clausula - player.marketValue : -Infinity;
-    case "reco": { const s = clausulazoScore(e, player); return s == null ? -Infinity : s; }
-    case "star": return isStarred(e.playerId) ? 1 : 0;
-    case "libera": return mktMsRestantes(e);
-    case "jornada": { const j = jornadaStatusFor(e); return j ? (j.seguro ? 1 : 0) : -1; }
-    case "fichado": return new Date(e.fecha).getTime();
-    default: return 0;
-  }
-}
-
-function sortMercadoEntries(filtered){
-  const withPlayer = filtered.map(e => ({e, player: players.find(p => String(p.id) === String(e.playerId))}));
-  if(mktSortKey){
-    const key = mktSortKey, dir = mktSortDir;
-    withPlayer.sort((a,b) => {
-      const va = mktColumnValue(a.e, a.player, key), vb = mktColumnValue(b.e, b.player, key);
-      if(va < vb) return -1 * dir;
-      if(va > vb) return 1 * dir;
-      return 0;
-    });
-  } else {
-    // Orden por defecto: primero jugadores ya sin protección de cláusula (ordenados por tendencia
-    // descendente), después el resto ordenados por días restantes ascendente (menos tiempo arriba).
-    withPlayer.sort((a,b) => {
-      const da = mktMsRestantes(a.e), db = mktMsRestantes(b.e);
-      const groupA = da <= 0 ? 0 : 1, groupB = db <= 0 ? 0 : 1;
-      if(groupA !== groupB) return groupA - groupB;
-      if(groupA === 0){
-        const ca = a.e.confirmado ? 1 : 0, cb = b.e.confirmado ? 1 : 0;
-        if(ca !== cb) return ca - cb; // "Por confirmar" (0) antes que "Libre" (1)
-        const ta = a.player ? trendFor(a.player).diff : 0, tb = b.player ? trendFor(b.player).diff : 0;
-        return tb - ta;
-      }
-      return da - db;
-    });
-  }
-  return withPlayer;
-}
-
-function renderMercadoView(){
-  const box = document.getElementById("mercadoWrap");
-  const filtered = radarEntries.filter(e => {
-    const player = players.find(p => String(p.id) === String(e.playerId));
-    const nameMatch = !searchTermMkt || normalizeName(player ? player.nickname : e.nombre).includes(normalizeName(searchTermMkt));
-    const estadoMatch = !mktEstadoFilter ||
-      (mktEstadoFilter === "libre" ? mktMsRestantes(e) <= 0 : mktMsRestantes(e) > 0);
-    return nameMatch &&
-           estadoMatch &&
-           matchesPos(player ? player.positionId : null) &&
-           matchesTeam(player ? player.teamAbbr : null) &&
-           matchesManager(e.rival);
-  });
-  if(filtered.length === 0){
-    box.innerHTML = `<div class="empty-radar">${radarEntries.length === 0 ? 'Aún no sigues ninguna cláusula. Pulsa "Marcar" en un jugador de la pestaña Jugadores.' : 'Ningún resultado con esos filtros.'}</div>`;
-    return;
-  }
-  const mktCols = [
-    ["star",""], ["name","Jugador"], ["team","Equipo"], ["pos","Posición"], ["manager","Manager"], ["value","Valor actual"],
-    ["trend","Tendencia"], ["sparkline","Últimos días"], ["clausula","Cláusula pagada"], ["diff","Diferencia"], ["reco","Rentabilidad"], ["libera","Libera en"], ["jornada","Jornada"]
-  ];
-  let html = "<table><thead><tr>" + mktCols.map(([key,label]) =>
-    `<th data-sort-key="${key}" data-table="mkt">${label}${sortArrow(key, mktSortKey, mktSortDir)}</th>`
-  ).join("") + "<th></th></tr></thead><tbody>";
-  let cardsHtml = "";
-
-  sortMercadoEntries(filtered).forEach(({e, player}) => {
-    const msRestantes = mktMsRestantes(e);
-    const starred = isStarred(e.playerId);
-    const rowClass = [
-      starred ? "mkt-starred" : "",
-      msRestantes <= 0 ? (e.confirmado ? "" : "mkt-limbo") : msRestantes <= 48*3600000 ? "mkt-soon" : ""
-    ].filter(Boolean).join(" ");
-    const liberaLabel = liberaLabelFor(e);
-    const valorActual = player ? player.marketValue : null;
-    const t = player ? trendFor(player) : {diff:0, dir:"flat"};
-    const arrow = t.dir === "up" ? "▲" : t.dir === "down" ? "▼" : "＝";
-    const diff = (valorActual != null && e.clausula) ? e.clausula - valorActual : null;
-    const diffClass = diff == null ? "" : diff >= 0 ? "diff-pos" : "diff-neg";
-    const diffLabel = diff == null ? "—" : (diff >= 0 ? "+" : "") + fmtEuro(diff);
-    const reco = clausulazoLabel(clausulazoScore(e, player));
-    const playerName = player ? player.nickname : e.nombre;
-    const enLimbo = msRestantes <= 0 && !e.confirmado;
-    const jStatus = jornadaStatusFor(e);
-
-    html += `<tr class="${rowClass}">
-      <td><button class="star-btn${starred ? ' starred' : ''}" data-star-id="${e.playerId}" title="Marcar interés">${starred ? "★" : "☆"}</button></td>
-      <td class="pname">${playerName}</td>
-      <td>${teamCrest(player ? player.teamAbbr : null)}</td>
-      <td>${player ? posBadge(player.positionId) : "—"}</td>
-      <td>${managerBadge(e.rival)}</td>
-      <td class="pval">${valorActual != null ? fmtEuro(valorActual) : "—"}</td>
-      <td class="trend ${t.dir}">${arrow} ${t.diff !== 0 ? fmtEuro(Math.abs(t.diff)) : "—"}</td>
-      <td>${player ? sparklineSVG(player.id) : "—"}</td>
-      <td class="pval">${e.clausula ? fmtEuro(e.clausula) : "—"}</td>
-      <td class="${diffClass}">${diffLabel}</td>
-      <td class="${reco.cls}" title="Compara la cláusula con el valor proyectado a 14 días si se mantiene la tendencia diaria actual">${reco.text}</td>
-      <td>${liberaLabel}${(msRestantes <= 0 && e.confirmado) ? "" : `<br><span class="ppts" style="font-size:11px;">fichado ${fechaLabelFor(e.fecha)}</span>`}</td>
-      <td class="${jStatus ? jStatus.cls : ''}" title="${jStatus ? jStatus.title : ''}">${jStatus ? jStatus.text : "—"}</td>
-      <td>
-        ${enLimbo ? `<button class="rm-btn" data-confirm-key="${e.key}" title="Confirmar: se queda tal cual">✔️</button>` : ""}
-        <button class="rm-btn" data-edit-key="${e.key}" title="Subir cláusula / transferir">✏️</button>
-        <button class="rm-btn" data-key="${e.key}" title="Dejar de seguir">✕</button>
-      </td>
-    </tr>`;
-
-    cardsHtml += `<div class="player-card ${rowClass}${starred ? ' mkt-starred' : ''}">
-      <div class="pc-top">
-        <div class="pc-name-wrap">
-          <button class="star-btn${starred ? ' starred' : ''}" data-star-id="${e.playerId}" title="Marcar interés">${starred ? "★" : "☆"}</button>
-          ${teamCrest(player ? player.teamAbbr : null)}
-          <span class="pc-name">${playerName}</span>
-        </div>
-        <div class="pc-actions">
-          ${enLimbo ? `<button class="rm-btn" data-confirm-key="${e.key}" title="Confirmar: se queda tal cual">✔️</button>` : ""}
-          <button class="rm-btn" data-edit-key="${e.key}" title="Subir cláusula / transferir">✏️</button>
-          <button class="rm-btn" data-key="${e.key}" title="Dejar de seguir">✕</button>
-        </div>
-      </div>
-      <div class="pc-grid">
-        <div><span class="pc-label">Manager</span><br>${managerBadge(e.rival)}</div>
-        <div><span class="pc-label">Valor actual</span><br>${valorActual != null ? fmtEuro(valorActual) : "—"}</div>
-        <div><span class="pc-label">Tendencia</span><br><span class="trend ${t.dir}">${arrow} ${t.diff !== 0 ? fmtEuro(Math.abs(t.diff)) : "—"}</span></div>
-        <div><span class="pc-label">Cláusula</span><br>${e.clausula ? fmtEuro(e.clausula) : "—"}</div>
-        <div><span class="pc-label">Diferencia</span><br><span class="${diffClass}">${diffLabel}</span></div>
-        <div><span class="pc-label">Rentabilidad</span><br><span class="${reco.cls}">${reco.text}</span></div>
-        <div><span class="pc-label">Libera en</span><br>${liberaLabel}</div>
-        <div style="grid-column:1 / -1;"><span class="pc-label">Últimos días</span><br>${player ? sparklineSVG(player.id) : "—"}</div>
-      </div>
-      ${(msRestantes <= 0 && e.confirmado) ? "" : `<div class="pc-label" style="margin-top:6px;">fichado ${fechaLabelFor(e.fecha)}</div>`}
-      ${jStatus ? `<div style="margin-top:4px;" class="${jStatus.cls}" title="${jStatus.title}">${jStatus.text}</div>` : ""}
-    </div>`;
-  });
-  html += "</tbody></table>";
-  const mktSortButtonsCols = [["value","Valor"], ["trend","Tendencia"], ["clausula","Cláusula"], ["diff","Diferencia"], ["reco","Rentabilidad"], ["libera","Libera en"]];
-  const mktSortButtonsHtml = `<div class="sort-buttons">${mktSortButtonsCols.map(([k,label]) =>
-    `<button data-sort-key="${k}" class="${mktSortKey === k ? 'active' : ''}">${label}${sortArrow(k, mktSortKey, mktSortDir)}</button>`
-  ).join("")}</div>`;
-  box.innerHTML = html + `<div class="player-cards">${mktSortButtonsHtml}${cardsHtml}</div>`;
-  document.querySelectorAll("#mercadoWrap .star-btn").forEach(btn => {
-    btn.onclick = () => toggleStar(btn.dataset.starId);
-  });
-  document.querySelectorAll("#mercadoWrap .rm-btn[data-key]").forEach(btn => {
-    btn.onclick = async () => {
-      const k = btn.dataset.key;
-      if(syncingKeys.has(k)) return;
-      syncingKeys.add(k);
-      try{
-        await syncSeguimiento("remove", {key: k});
-        radarEntries = radarEntries.filter(e => e.key !== k);
-        await saveRadar();
-        renderMercadoView();
-      } finally {
-        syncingKeys.delete(k);
-      }
-    };
-  });
-  document.querySelectorAll("#mercadoWrap .rm-btn[data-edit-key]").forEach(btn => {
-    btn.onclick = () => openEditModal(btn.dataset.editKey);
-  });
-  document.querySelectorAll("#mercadoWrap .rm-btn[data-confirm-key]").forEach(btn => {
-    btn.onclick = () => confirmSinCambios(btn.dataset.confirmKey);
-  });
-  document.querySelectorAll('#mercadoWrap th[data-sort-key]').forEach(th => {
-    th.onclick = () => {
-      const key = th.dataset.sortKey;
-      if(mktSortKey === key){ mktSortDir = mktSortDir === 1 ? -1 : 1; }
-      else { mktSortKey = key; mktSortDir = 1; }
-      renderMercadoView();
-    };
-  });
-  document.querySelectorAll('#mercadoWrap .sort-buttons button').forEach(btn => {
-    btn.onclick = () => {
-      const key = btn.dataset.sortKey;
-      if(mktSortKey === key){ mktSortDir = mktSortDir === 1 ? -1 : 1; }
-      else { mktSortKey = key; mktSortDir = 1; }
-      renderMercadoView();
-    };
-  });
-}
-
-let equiposSortKey = "total";
-let equiposSortDir = -1;
-
-function renderEquiposView(){
-  const box = document.getElementById("equiposWrap");
-  if(radarEntries.length === 0){
-    box.innerHTML = `<div class="empty-radar">Aún no hay jugadores marcados en Mercado. En cuanto añadas alguno con un rival (o tu propio nombre), aparecerá aquí agregado.</div>`;
-    return;
-  }
-  const byManager = {};
-  radarEntries.forEach(e => {
-    const player = players.find(p => String(p.id) === String(e.playerId));
-    const manager = e.rival || "Sin nombre";
-    if(!byManager[manager]) byManager[manager] = {manager, count:0, total:0, trendTotal:0, clausulaTotal:0};
-    byManager[manager].count++;
-    if(player){
-      byManager[manager].total += player.marketValue;
-      byManager[manager].trendTotal += trendFor(player).diff;
-    }
-    if(e.clausula) byManager[manager].clausulaTotal += e.clausula;
-  });
-  let rows = Object.values(byManager);
-  const key = equiposSortKey, dir = equiposSortDir;
-  rows.sort((a,b) => {
-    const va = key === "manager" ? a.manager.toLowerCase() : (key === "count" ? a.count : key === "clausulaTotal" ? a.clausulaTotal : key === "trendTotal" ? a.trendTotal : a.total);
-    const vb = key === "manager" ? b.manager.toLowerCase() : (key === "count" ? b.count : key === "clausulaTotal" ? b.clausulaTotal : key === "trendTotal" ? b.trendTotal : b.total);
-    if(va < vb) return -1 * dir;
-    if(va > vb) return 1 * dir;
-    return 0;
-  });
-
-  const eqCols = [["manager","Manager"], ["count","Jugadores"], ["total","Valor total"], ["trendTotal","Tendencia"], ["clausulaTotal","Invertido en cláusulas"]];
-  let html = "<table><thead><tr>" + eqCols.map(([k,label]) =>
-    `<th data-sort-key="${k}">${label}${sortArrow(k, equiposSortKey, equiposSortDir)}</th>`
-  ).join("") + "</tr></thead><tbody>";
-  rows.forEach(r => {
-    const cls = r.trendTotal > 0 ? "up" : r.trendTotal < 0 ? "down" : "flat";
-    const arrow = r.trendTotal > 0 ? "▲" : r.trendTotal < 0 ? "▼" : "＝";
-    html += `<tr>
-      <td class="pname">${r.manager}</td>
-      <td class="ppts">${r.count}</td>
-      <td class="pval">${fmtEuro(r.total)}</td>
-      <td class="trend ${cls}">${arrow} ${r.trendTotal !== 0 ? fmtEuro(Math.abs(r.trendTotal)) : "—"}</td>
-      <td class="pval">${r.clausulaTotal ? fmtEuro(r.clausulaTotal) : "—"}</td>
-    </tr>`;
-  });
-  html += "</tbody></table>";
-
-  const sortButtonsHtml = `<div class="sort-buttons">${eqCols.map(([k,label]) =>
-    `<button data-sort-key="${k}" class="${equiposSortKey === k ? 'active' : ''}">${label}${sortArrow(k, equiposSortKey, equiposSortDir)}</button>`
-  ).join("")}</div>`;
-
-  let cardsHtml = "";
-  rows.forEach(r => {
-    const cls = r.trendTotal > 0 ? "up" : r.trendTotal < 0 ? "down" : "flat";
-    const arrow = r.trendTotal > 0 ? "▲" : r.trendTotal < 0 ? "▼" : "＝";
-    cardsHtml += `<div class="team-card">
-      <div class="tc-top">${managerBadge(r.manager)}</div>
-      <div class="pc-grid">
-        <div><span class="pc-label">Jugadores</span><br>${r.count}</div>
-        <div><span class="pc-label">Valor total</span><br>${fmtEuro(r.total)}</div>
-        <div><span class="pc-label">Invertido</span><br>${r.clausulaTotal ? fmtEuro(r.clausulaTotal) : "—"}</div>
-        <div><span class="pc-label">Tendencia</span><br><span class="trend ${cls}">${arrow} ${r.trendTotal !== 0 ? fmtEuro(Math.abs(r.trendTotal)) : "—"}</span></div>
-      </div>
-    </div>`;
-  });
-
-  box.innerHTML = html + `<div class="player-cards">${sortButtonsHtml}${cardsHtml}</div>`;
-
-  document.querySelectorAll('#equiposWrap .sort-buttons button').forEach(btn => {
-    btn.onclick = () => {
-      const k = btn.dataset.sortKey;
-      if(equiposSortKey === k){ equiposSortDir = equiposSortDir === 1 ? -1 : 1; }
-      else { equiposSortKey = k; equiposSortDir = 1; }
-      renderEquiposView();
-    };
-  });
-
-  document.querySelectorAll('#equiposWrap th[data-sort-key]').forEach(th => {
-    th.onclick = () => {
-      const k = th.dataset.sortKey;
-      if(equiposSortKey === k){ equiposSortDir = equiposSortDir === 1 ? -1 : 1; }
-      else { equiposSortKey = k; equiposSortDir = 1; }
-      renderEquiposView();
-    };
-  });
-}
-
-const MY_MANAGER = "La Pimienta FC";
-
-const ONCE_FORMATIONS = [
-  {def:5,mid:4,fwd:1}, {def:5,mid:3,fwd:2}, {def:5,mid:2,fwd:3},
-  {def:4,mid:6,fwd:0}, {def:4,mid:5,fwd:1}, {def:4,mid:4,fwd:2}, {def:4,mid:3,fwd:3}, {def:4,mid:2,fwd:4},
-  {def:3,mid:6,fwd:1}, {def:3,mid:5,fwd:2}, {def:3,mid:4,fwd:3}, {def:3,mid:3,fwd:4}
-];
-
-function playerOnceScore(p){
-  const tendenciaDiaria = weeklyTrend(p);
-  const nf = nextFixtureFor(p.teamAbbr);
-  const dificultad = nf && nf.dificultad ? nf.dificultad : 3;
-  const base = (tendenciaDiaria / 1000000) - (dificultad - 3) * 0.5;
-  const prob = p.startProb != null ? p.startProb : 60; // sin dato, asumimos duda moderada
-  return base * (prob / 100);
-}
-
-function computeRecommendedOnce(){
-  const myPlayers = radarEntries
-    .filter(e => e.rival === MY_MANAGER)
-    .map(e => players.find(p => String(p.id) === String(e.playerId)))
-    .filter(Boolean);
-
-  const byPos = {1:[], 2:[], 3:[], 4:[], 5:[]};
-  myPlayers.forEach(p => { if(byPos[p.positionId]) byPos[p.positionId].push(p); });
-  Object.keys(byPos).forEach(k => byPos[k].sort((a,b) => playerOnceScore(b) - playerOnceScore(a)));
-
-  if(byPos[1].length === 0) return {ok:false, myCount: myPlayers.length};
-
-  let best = null;
-  ONCE_FORMATIONS.forEach(f => {
-    if(byPos[2].length < f.def || byPos[3].length < f.mid || byPos[4].length < f.fwd) return;
-    const gk = byPos[1][0];
-    const defs = byPos[2].slice(0, f.def);
-    const mids = byPos[3].slice(0, f.mid);
-    const fwds = byPos[4].slice(0, f.fwd);
-    const eleven = [gk, ...defs, ...mids, ...fwds];
-    const scores = eleven.map(playerOnceScore);
-    const captainIdx = scores.indexOf(Math.max(...scores));
-    const captain = eleven[captainIdx];
-    const total = scores.reduce((s,v)=>s+v, 0) + scores[captainIdx]; // el capitán cuenta doble
-    if(!best || total > best.total){
-      best = {formation: f, gk, defs, mids, fwds, captain, total};
-    }
-  });
-
-  if(!best) return {ok:false, myCount: myPlayers.length, notEnough:true};
-
-  const f = best.formation;
-  const manager = byPos[5][0] || null;
-  const benchGK = byPos[1][1] || null;
-  const benchDef = byPos[2][f.def] || null;
-  const benchMid = byPos[3][f.mid] || null;
-  const benchFwd = byPos[4][f.fwd] || null;
-
-  return {ok:true, ...best, manager, benchGK, benchDef, benchMid, benchFwd};
-}
-
-function onceCard(p, captain){
-  const score = playerOnceScore(p);
-  const scoreLabel = (score >= 0 ? "+" : "") + score.toFixed(1);
-  const isCaptain = captain && String(captain.id) === String(p.id);
-  return `<div class="pitch-card">
-    ${teamCrest(p.teamAbbr)}
-    <span class="pname">${p.nickname}${isCaptain ? '<span class="captain-badge" title="Capitán · puntúa doble">C</span>' : ''}</span>
-    <span class="pscore">${scoreLabel}</span>
-  </div>`;
-}
-
-function myTeamListHtml(){
-  const myPlayers = radarEntries
-    .filter(e => e.rival === MY_MANAGER)
-    .map(e => players.find(p => String(p.id) === String(e.playerId)))
-    .filter(Boolean);
-
-  if(myPlayers.length === 0) return "";
-
-  const byPos = {1:[], 2:[], 3:[], 4:[], 5:[]};
-  myPlayers.forEach(p => { if(byPos[p.positionId]) byPos[p.positionId].push(p); });
-  Object.keys(byPos).forEach(k => byPos[k].sort((a,b) => playerOnceScore(b) - playerOnceScore(a)));
-
-  let html = "";
-  [1,2,3,4,5].forEach(posId => {
-    const list = byPos[posId];
-    if(!list || list.length === 0) return;
-    html += `<h3>${POSITIONS[posId]}</h3><table style="table-layout:fixed;"><colgroup>
-      <col style="width:34%"><col style="width:16%"><col style="width:20%"><col style="width:30%">
-    </colgroup><thead><tr><th>Jugador</th><th>Equipo</th><th>Titular</th><th>Próx. rival</th></tr></thead><tbody>`;
-    list.forEach(p => {
-      const nf = nextFixtureFor(p.teamAbbr);
-      let rivalCell = "—";
-      if(nf){
-        const dl = difficultyLabel(nf.dificultad);
-        const homeIcon = nf.local ? "🏠" : "✈️";
-        rivalCell = `<div style="display:flex; flex-direction:column; align-items:center; gap:2px;">
-          <span>${homeIcon} ${teamCrest(nf.rival)}</span>
-          <span class="${dl.cls}" style="font-size:10px; white-space:nowrap;">(${dl.text})</span>
-        </div>`;
-      }
-      html += `<tr>
-        <td class="pname">${p.nickname}</td>
-        <td>${teamCrest(p.teamAbbr)}</td>
-        <td>${startProbLabel(p.startProb)}</td>
-        <td class="ppts">${rivalCell}</td>
-      </tr>`;
-    });
-    html += "</tbody></table>";
-  });
-  return html;
-}
-
-function renderOnceView(){
-  const box = document.getElementById("onceWrap");
-  const result = computeRecommendedOnce();
-
-  if(!result.ok){
-    const msg = result.myCount === 0
-      ? `Aún no has marcado ningún jugador tuyo en Mercado. Ve a Jugadores, pulsa "Marcar" y pon <b>${MY_MANAGER}</b> como manager.`
-      : `Tienes ${result.myCount} jugador(es) marcado(s), pero faltan para completar una alineación válida (necesitas al menos 1 portero y suficientes jugadores en cada línea).`;
-    box.innerHTML = `<div class="empty-radar">${msg}</div>`;
-    return;
-  }
-
-  const f = result.formation;
-  const label = `1-${f.def}-${f.mid}-${f.fwd}`;
-
-  const benchItems = [
-    ["Portero", result.benchGK],
-    ["Defensa", result.benchDef],
-    ["Medio", result.benchMid],
-    ["Delantero", result.benchFwd]
-  ].filter(([, p]) => p);
-
-  const benchHtml = benchItems.length
-    ? `<div class="formation-label" style="font-size:18px; margin-top:24px;">Banquillo</div>
-       <div class="pitch-row">${benchItems.map(([, p]) => onceCard(p, null)).join("")}</div>`
-    : `<div class="sub" style="margin-top:20px; color:var(--chalk-dim); font-size:12px;">Sin suplentes disponibles todavía en esa posición.</div>`;
-
-  const managerHtml = result.manager
-    ? `<div class="formation-label" style="font-size:18px; margin-top:24px;">Manager recomendado</div>
-       <div class="pitch-row">${onceCard(result.manager, null)}</div>`
-    : "";
-
-  box.innerHTML = `
-    <div class="once-layout">
-      <div class="once-left">
-        <div class="formation-label">Formación sugerida: ${label}</div>
-        <div class="pitch">
-          <div class="pitch-row">${result.fwds.map(p => onceCard(p, result.captain)).join("")}</div>
-          <div class="pitch-row">${result.mids.map(p => onceCard(p, result.captain)).join("")}</div>
-          <div class="pitch-row">${result.defs.map(p => onceCard(p, result.captain)).join("")}</div>
-          <div class="pitch-row">${onceCard(result.gk, result.captain)}</div>
-        </div>
-        ${benchHtml}
-        ${managerHtml}
-        <div class="sub" style="margin-top:14px; color:var(--chalk-dim); font-size:12px;">
-          El número bajo cada jugador combina su tendencia de valor reciente, la dificultad de su próximo rival y su probabilidad de ser titular — no son puntos de fantasy reales, es una estimación mientras no tengamos más datos de la temporada. La <b>C</b> marca al capitán elegido (puntúa doble). Si un titular no juega ni un minuto, su suplente de la misma línea puntuaría en su lugar; si es el capitán quien no juega, su suplente puntúa por él pero sin el x2.
-        </div>
-      </div>
-      <div class="once-right">
-        ${myTeamListHtml()}
-      </div>
-    </div>
-  `;
-}
-
-function renderTicker(){
-  const withTrend = players.map(p => ({p, t: trendFor(p)})).filter(x => x.t.diff !== 0);
-  withTrend.sort((a,b)=> Math.abs(b.t.diff) - Math.abs(a.t.diff));
-  const top = withTrend.slice(0, 24);
-  if(top.length === 0){
-    document.getElementById("ticker").innerHTML = `<span class="tick-item name">Sin histórico todavía — vuelve mañana para ver movimientos de mercado.</span>`;
-    return;
-  }
-  document.getElementById("ticker").innerHTML = top.map(x => {
-    const cls = x.t.dir === "up" ? "tick-up" : "tick-down";
-    const arrow = x.t.dir === "up" ? "▲" : "▼";
-    return `<span class="tick-item"><span class="name">${x.p.nickname}</span><span class="${cls}">${arrow} ${fmtEuro(Math.abs(x.t.diff))}</span></span>`;
-  }).join("");
-}
-
-function render(){
-  document.getElementById("viewJugadores").style.display = currentView === "jugadores" ? "" : "none";
-  document.getElementById("viewMercado").style.display = currentView === "mercado" ? "" : "none";
-  document.getElementById("viewEquipos").style.display = currentView === "equipos" ? "" : "none";
-  document.getElementById("viewOnce").style.display = currentView === "once" ? "" : "none";
-
-  if(currentView === "jugadores"){
-    renderTable();
-  } else if(currentView === "mercado"){
-    renderMercadoView();
-  } else if(currentView === "equipos"){
-    renderEquiposView();
-  } else if(currentView === "once"){
-    renderOnceView();
-  }
-  renderTicker();
-}
-
-document.querySelectorAll("#viewTabs button").forEach(btn => {
-  btn.onclick = () => {
-    currentView = btn.dataset.view;
-    document.querySelectorAll("#viewTabs button").forEach(b => b.classList.toggle("active", b === btn));
-    document.getElementById("posFilterInput").value = posFilterText;
-    document.getElementById("teamFilterInput").value = teamFilterText;
-    document.getElementById("posFilterInputMkt").value = posFilterText;
-    document.getElementById("teamFilterInputMkt").value = teamFilterText;
-    document.getElementById("managerFilterInput").value = managerFilterText;
-    render();
-  };
-});
-
-function openModal(playerId){
-  const p = players.find(pl => String(pl.id) === String(playerId));
-  const existing = radarEntries.find(e => String(e.playerId) === String(playerId));
-  if(existing){
-    openConflictModal(existing, p);
-    return;
-  }
-  document.getElementById("mpName").textContent = p.nickname;
-  document.getElementById("mpTeam").textContent = p.teamAbbr + " · " + POSITIONS[p.positionId] + " · valor actual " + fmtEuro(p.marketValue);
-  document.getElementById("mpRival").value = "";
-  buildManagerChips("mpRivalSlider", "mpRival", "");
-  document.getElementById("mpDate").value = todayAt1442();
-  document.getElementById("mpClause").value = "";
-  document.getElementById("overlay").classList.add("show");
-  document.getElementById("mpSave").onclick = async () => {
-    const rival = document.getElementById("mpRival").value.trim();
-    const fecha = document.getElementById("mpDate").value;
-    const clausula = parseEuroInput(document.getElementById("mpClause").value);
-    if(!rival || !fecha) return;
-    radarEntries.push({
-      key: p.id + "_" + Date.now(),
-      playerId: p.id,
-      nombre: p.nickname,
-      rival,
-      fecha,
-      clausula,
-      valorAlFichar: p.marketValue,
-      confirmado: false,
-      proteccionMs: PROTECCION_NORMAL_MS
-    });
-    syncSeguimiento("add", radarEntries[radarEntries.length - 1]);
-    await saveRadar();
-    populateFilterOptions();
-    document.getElementById("overlay").classList.remove("show");
-    render();
-  };
-}
-document.getElementById("mpCancel").onclick = () => document.getElementById("overlay").classList.remove("show");
-document.getElementById("overlay").onclick = (e) => { if(e.target.id === "overlay") e.currentTarget.classList.remove("show"); };
-
-let editEntryKey = null;
-let editMode = "raise";
-
-function setEditMode(mode){
-  editMode = mode;
-  document.getElementById("editRaiseFields").style.display = mode === "raise" ? "" : "none";
-  document.getElementById("editTransferFields").style.display = mode === "transfer" ? "" : "none";
-  document.getElementById("editSellFields").style.display = mode === "sell" ? "" : "none";
-  document.getElementById("editBlindarFields").style.display = mode === "blindar" ? "" : "none";
-  document.getElementById("editModeRaise").classList.toggle("active", mode === "raise");
-  document.getElementById("editModeTransfer").classList.toggle("active", mode === "transfer");
-  document.getElementById("editModeSell").classList.toggle("active", mode === "sell");
-  document.getElementById("editModeBlindar").classList.toggle("active", mode === "blindar");
-}
-
-function openEditModal(entryKey){
-  editEntryKey = entryKey;
-  const entry = radarEntries.find(e => e.key === entryKey);
-  if(!entry) return;
-  const player = players.find(p => String(p.id) === String(entry.playerId));
-  document.getElementById("editName").textContent = player ? player.nickname : entry.nombre;
-  document.getElementById("editInfo").textContent = `Manager actual: ${entry.rival} · Cláusula actual: ${entry.clausula ? fmtEuro(entry.clausula) : "sin registrar"}`;
-  document.getElementById("raiseAmount").value = toMillionsInput(entry.clausula);
-  document.getElementById("transferManager").value = "";
-  buildManagerChips("transferManagerSlider", "transferManager", "");
-  document.getElementById("transferClause").value = "";
-  document.getElementById("transferDate").value = nowLocalDatetime();
-  document.getElementById("blindarDate").value = nowLocalDatetime();
-  const esLibre = mktMsRestantes(entry) <= 0;
-  document.getElementById("editModeBlindar").style.display = esLibre ? "" : "none";
-  setEditMode("raise");
-  document.getElementById("editOverlay").classList.add("show");
-}
-
-document.getElementById("editModeRaise").onclick = () => setEditMode("raise");
-document.getElementById("editModeTransfer").onclick = () => setEditMode("transfer");
-document.getElementById("editModeSell").onclick = () => setEditMode("sell");
-document.getElementById("editModeBlindar").onclick = () => setEditMode("blindar");
-
-let conflictKey = null;
-
-function openConflictModal(existingEntry, player){
-  conflictKey = existingEntry.key;
-  document.getElementById("conflictName").textContent = player ? player.nickname : existingEntry.nombre;
-  document.getElementById("conflictInfo").innerHTML =
-    `Ya está en Mercado con <b>${existingEntry.rival}</b> · Cláusula actual: ${existingEntry.clausula ? fmtEuro(existingEntry.clausula) : "sin registrar"} · Libera en: ${liberaLabelFor(existingEntry)}`;
-  document.getElementById("conflictClause").value = toMillionsInput(existingEntry.clausula);
-  document.getElementById("conflictDate").value = existingEntry.fecha ? msToLocalDatetimeInput(existingEntry.fecha) : nowLocalDatetime();
-  document.getElementById("conflictOverlay").classList.add("show");
-}
-
-document.getElementById("conflictClose").onclick = () => document.getElementById("conflictOverlay").classList.remove("show");
-document.getElementById("conflictCancel").onclick = () => document.getElementById("conflictOverlay").classList.remove("show");
-document.getElementById("conflictOverlay").onclick = (e) => { if(e.target.id === "conflictOverlay") e.currentTarget.classList.remove("show"); };
-
-document.getElementById("conflictSave").onclick = async () => {
-  const entry = radarEntries.find(e => e.key === conflictKey);
-  if(!entry) return;
-  entry.clausula = parseEuroInput(document.getElementById("conflictClause").value);
-  entry.fecha = document.getElementById("conflictDate").value;
-  await syncSeguimiento("update", entry);
-  await saveRadar();
-  document.getElementById("conflictOverlay").classList.remove("show");
-  render();
-};
-
-document.getElementById("editCancel").onclick = () => document.getElementById("editOverlay").classList.remove("show");
-document.getElementById("editOverlay").onclick = (e) => { if(e.target.id === "editOverlay") e.currentTarget.classList.remove("show"); };
-
-document.getElementById("editSave").onclick = async () => {
-  const entry = radarEntries.find(e => e.key === editEntryKey);
-  if(!entry) return;
-
-  if(editMode === "raise"){
-    const amount = parseEuroInput(document.getElementById("raiseAmount").value);
-    if(!amount) return;
-    entry.clausula = amount;
-    if(mktMsRestantes(entry) <= 0) entry.confirmado = true; // solo si ya estaba liberado; si sigue protegido, no tocar
-    await syncSeguimiento("update", entry);
-  } else if(editMode === "transfer"){
-    const manager = document.getElementById("transferManager").value.trim();
-    const clauseVal = parseEuroInput(document.getElementById("transferClause").value);
-    const date = document.getElementById("transferDate").value;
-    if(!manager || !date) return;
-    const player = players.find(p => String(p.id) === String(entry.playerId));
-    entry.rival = manager;
-    entry.clausula = clauseVal;
-    entry.fecha = date;
-    entry.valorAlFichar = player ? player.marketValue : entry.valorAlFichar;
-    entry.confirmado = false; // empieza un ciclo de protección nuevo
-    entry.proteccionMs = PROTECCION_NORMAL_MS;
-    await syncSeguimiento("update", entry);
-  } else if(editMode === "sell"){
-    await syncSeguimiento("remove", {key: editEntryKey});
-    radarEntries = radarEntries.filter(e => e.key !== editEntryKey);
-  } else if(editMode === "blindar"){
-    if(mktMsRestantes(entry) > 0) return; // solo se puede blindar estando libre
-    const blindarDate = document.getElementById("blindarDate").value;
-    if(!blindarDate) return;
-    entry.fecha = blindarDate;
-    entry.proteccionMs = PROTECCION_BLINDAJE_MS;
-    entry.confirmado = false;
-    await syncSeguimiento("update", entry);
-  }
-
-  await saveRadar();
-  populateFilterOptions();
-  document.getElementById("editOverlay").classList.remove("show");
-  renderMercadoView();
-};
-
-document.getElementById("search").addEventListener("input", (e) => { searchTerm = e.target.value; renderTable(); });
-document.getElementById("searchMkt").addEventListener("input", (e) => { searchTermMkt = e.target.value; renderMercadoView(); });
-document.getElementById("posFilterInput").addEventListener("input", (e) => { posFilterText = e.target.value; renderTable(); });
-document.getElementById("teamFilterInput").addEventListener("input", (e) => { teamFilterText = e.target.value; renderTable(); });
-document.getElementById("posFilterInputMkt").addEventListener("input", (e) => { posFilterText = e.target.value; renderMercadoView(); });
-document.getElementById("teamFilterInputMkt").addEventListener("input", (e) => { teamFilterText = e.target.value; renderMercadoView(); });
-document.getElementById("managerFilterInput").addEventListener("input", (e) => { managerFilterText = e.target.value; renderMercadoView(); });
-document.getElementById("resyncBtn").addEventListener("click", async () => {
-  await resyncAllSeguimiento();
-  alert("Se ha mandado todo lo que hay en Mercado al puente de Telegram.");
-});
-document.getElementById("filtroLibresBtn").addEventListener("click", () => {
-  mktEstadoFilter = mktEstadoFilter === "libre" ? null : "libre";
-  document.getElementById("filtroLibresBtn").classList.toggle("active", mktEstadoFilter === "libre");
-  document.getElementById("filtroPendientesBtn").classList.remove("active");
-  renderMercadoView();
-});
-document.getElementById("filtroPendientesBtn").addEventListener("click", () => {
-  mktEstadoFilter = mktEstadoFilter === "pendiente" ? null : "pendiente";
-  document.getElementById("filtroPendientesBtn").classList.toggle("active", mktEstadoFilter === "pendiente");
-  document.getElementById("filtroLibresBtn").classList.remove("active");
-  renderMercadoView();
-});
-
-async function init(){
-  await loadStorage();
-  await loadStarred();
-  checkClauseAlerts();
-  try{
-    await fetchPlayers();
-    await loadPrevSnapshot();
-    await loadFixtures();
-    await loadHistory();
-    populateFilterOptions();
-    const snapDate = prevSnapshot.date ? `· histórico desde ${prevSnapshot.date}` : "· sin histórico previo todavía";
-    document.getElementById("statusBox").innerHTML = `<b>${players.length}</b> jugadores · actualizado ${new Date().toLocaleTimeString("es-ES")} ${snapDate}`;
-    render();
-  }catch(err){
-    document.getElementById("tableWrap").innerHTML = `<div class="loading" style="text-align:left;">
-      No se ha podido conectar con fantasy-data (los proxies disponibles han fallado).<br/><br/>
-      Como alternativa, abre <span class="mono">${DATA_REPO_BASE}/latest.json</span> en una pestaña, copia todo el JSON y pégalo aquí:
-      <textarea id="manualJson" style="width:100%; height:120px; margin-top:10px; background:var(--pitch-deep); border:1px solid var(--pitch-line); color:var(--chalk); border-radius:8px; padding:8px; font-family:'JetBrains Mono',monospace; font-size:11px;"></textarea>
-      <div style="margin-top:10px;"><button class="btn-primary" id="manualLoadBtn" style="width:auto; padding:8px 18px;">Cargar datos pegados</button></div>
-    </div>`;
-    document.getElementById("statusBox").textContent = "sin conexión con fantasy-data";
-    document.getElementById("manualLoadBtn").onclick = async () => {
-      try{
-        const latest = JSON.parse(document.getElementById("manualJson").value);
-        const values = latest.values || {};
-        players = Object.keys(values).map(key => {
-          const v = values[key];
-          const entry = (v && typeof v === "object") ? v : {value: v};
-          return {
-            id: key,
-            nickname: entry.name || key,
-            positionId: POSITION_NAME_TO_ID[entry.position] || 0,
-            teamAbbr: entry.team || "—",
-            marketValue: Number(entry.value),
-            prevValue: entry.prevValue != null ? Number(entry.prevValue) : null,
-            startProb: entry.probabilidad != null ? Number(entry.probabilidad) : null,
-            points: null,
-            averagePoints: null,
-            playerStatus: entry.estado || null
-          };
-        });
-        document.getElementById("statusBox").innerHTML = `<b>${players.length}</b> jugadores · cargado manualmente`;
-        await loadPrevSnapshot();
-        await loadFixtures();
-        await loadHistory();
-        populateFilterOptions();
-        render();
-      }catch(e){
-        alert("Ese texto no es un JSON válido. Copia el contenido completo de latest.json y vuelve a intentarlo.");
-      }
-    };
-  }
-}
-init();
-</script>
-</body>
-</html>
+
+    def get_sha(path):
+        r = requests.get(f"{api_base}/{path}", headers=headers, timeout=30)
+        return r.json()["sha"] if r.status_code == 200 else None
+
+    def get_json(path, default):
+        r = requests.get(f"{api_base}/{path}", headers=headers, timeout=30)
+        if r.status_code != 200:
+            return default
+        return json.loads(base64.b64decode(r.json()["content"]))
+
+    def put_json(path, data, message):
+        content = base64.b64encode(json.dumps(data).encode()).decode()
+        body = {"message": message, "content": content}
+        sha = get_sha(path)
+        if sha:
+            body["sha"] = sha
+        r = requests.put(f"{api_base}/{path}", headers=headers, json=body, timeout=30)
+        r.raise_for_status()
+
+    history = get_json("history.json", {})
+    today = str(date.today())
+
+    for p in players:
+        if not p.get("name"):
+            continue
+        pid = str(p["id"])
+        entries = history.get(pid, [])
+        if entries and entries[-1].get("date") == today:
+            entries[-1]["value"] = int(p["price"])
+        else:
+            entries.append({"date": today, "value": int(p["price"])})
+        history[pid] = entries[-5:]  # solo los últimos 5 días
+
+    put_json("history.json", history, f"history update {today}")
+    print(f"✅ history.json actualizado ({len(history)} jugadores)")
+
+
+# -----------------------------------
+# SCRAPER (analiticafantasy.com — JSON embebido en la página)
+# -----------------------------------
+
+# Los datos de cada jugador vienen como JSON escapado dentro del payload de
+# Next.js (self.__next_f.push(...)). Esta expresión busca cada objeto de
+# jugador por sus campos, en el orden en que aparecen en la web.
+PLAYER_RECORD_RE = re.compile(
+    r'\{\\"nickname\\":\\"(?P<nickname>(?:[^"\\]|\\.)*?)\\".*?'
+    r'\\"masterPlayerId\\":(?P<mpid>null|\d+).*?'
+    r'\\"positionId\\":(?P<pos>\d+).*?'
+    r'\\"coachId\\":(?P<coachid>null|\d+).*?'
+    r'\\"marketValue\\":(?P<value>-?\d+).*?'
+    r'\\"subida\\":(?P<subida>-?\d+).*?'
+    r'\\"playerStatus\\":\\"(?P<status>[a-zA-Z]+)\\".*?'
+    r'\\"isSanctioned\\":(?P<sanc>true|false).*?'
+    r'\\"teamId\\":(?P<teamid>\d+).*?'
+    r'\\"titularityPercent\\":(?P<prob>null|\d+)'
+)
+
+
+def unescape_name(raw):
+    return raw.replace('\\\\', '\\').replace('\\"', '"')
+
+
+def get_players():
+
+    response = requests.get(URL, headers=HEADERS, timeout=20)
+    response.raise_for_status()
+
+    players = []
+    seen_ids = set()
+
+    for m in PLAYER_RECORD_RE.finditer(response.text):
+
+        mpid = m.group("mpid")
+        coachid = m.group("coachid")
+
+        if mpid != "null":
+            player_id = f"p{mpid}"
+        elif coachid != "null":
+            player_id = f"c{coachid}"
+        else:
+            continue  # ni jugador ni entrenador identificable, se descarta
+
+        if player_id in seen_ids:
+            continue
+        seen_ids.add(player_id)
+
+        name = unescape_name(m.group("nickname")).strip()
+        if not name:
+            continue
+
+        status_raw = m.group("status")
+        is_sanctioned = m.group("sanc") == "true"
+        if is_sanctioned:
+            status = "suspended"
+        elif status_raw in ("injured", "doubtful"):
+            status = status_raw
+        else:
+            status = None
+
+        prob_raw = m.group("prob")
+
+        players.append({
+            "id": player_id,
+            "name": name,
+            "team_id": int(m.group("teamid")),
+            "position": POSITION_ID_TO_NAME.get(int(m.group("pos"))),
+            "price": int(m.group("value")),
+            "trend": int(m.group("subida")),
+            "titularity": int(prob_raw) if prob_raw != "null" else None,
+            "status": status,
+        })
+
+    if not players:
+        print("⚠️ La expresión no encontró ningún jugador — probablemente la web cambió el formato del JSON interno, revisar PLAYER_RECORD_RE")
+
+    return players
+
+
+
+
+# -----------------------------------
+# EQUIPOS NOTION
+# -----------------------------------
+
+def get_teams():
+
+    teams = {}
+
+    cursor = None
+
+
+    while True:
+
+        response = notion.databases.query(
+            database_id=NOTION_DB_TEAMS,
+            start_cursor=cursor
+        )
+
+
+        for page in response["results"]:
+
+            props = page["properties"]
+
+
+            title = props.get("Equipo")
+
+
+            if (
+                title
+                and title.get("title")
+            ):
+
+                name = title["title"][0]["text"]["content"]
+
+                teams[name] = page["id"]
+
+
+
+        if not response["has_more"]:
+
+            break
+
+
+        cursor = response.get("next_cursor")
+
+
+    return teams
+
+
+
+
+def get_team_relation(team_id, teams):
+
+    if team_id not in TEAM_MAPPING:
+        return []
+
+    team_name = TEAM_MAPPING[team_id]
+
+    if team_name not in teams:
+        return []
+
+    return [
+        {
+            "id": teams[team_name]
+        }
+    ]
+
+
+
+
+# -----------------------------------
+# JUGADORES EXISTENTES
+# -----------------------------------
+
+def get_existing_players():
+
+    existing = {}
+
+    cursor = None
+
+
+    while True:
+
+        response = notion.databases.query(
+            database_id=NOTION_DB_PLAYERS,
+            start_cursor=cursor
+        )
+
+
+        for page in response["results"]:
+
+            props = page["properties"]
+
+
+            api = props.get("API_ID")
+
+
+            if (
+                api
+                and api.get("number")
+            ):
+
+                existing[
+                    api["number"]
+                ] = page["id"]
+
+
+
+        if not response["has_more"]:
+
+            break
+
+
+        cursor = response.get("next_cursor")
+
+
+    return existing
+
+
+
+
+
+# -----------------------------------
+# CREAR
+# -----------------------------------
+
+def create_player(player, teams):
+
+    notion.pages.create(
+
+        parent={
+            "database_id": NOTION_DB_PLAYERS
+        },
+
+        properties={
+
+            "Jugador": {
+                "title": [
+                    {
+                        "text": {
+                            "content": player["name"]
+                        }
+                    }
+                ]
+            },
+
+            "Posición": {
+                "select": {
+                    "name": player["position"]
+                }
+                if player["position"]
+                else None
+            },
+
+            "Equipo": {
+                "relation": get_team_relation(
+                    player["team_id"],
+                    teams
+                )
+            },
+
+            "Valor": {
+                "number": format_price(player["price"])
+            },
+
+            "Tendencia": {
+                "number": format_trend(player["trend"])
+            },
+
+            "API_ID": {
+                "number": player["id"]
+            }
+
+        }
+
+    )
+
+
+
+
+# -----------------------------------
+# ACTUALIZAR
+# -----------------------------------
+
+def update_player(page_id, player, teams):
+
+    notion.pages.update(
+
+        page_id=page_id,
+
+        properties={
+
+            "Posición": {
+                "select": {
+                    "name": player["position"]
+                }
+                if player["position"]
+                else None
+            },
+
+            "Equipo": {
+                "relation": get_team_relation(
+                    player["team_id"],
+                    teams
+                )
+            },
+
+            "Valor": {
+                "number": format_price(player["price"])
+            },
+
+            "Tendencia": {
+                "number": format_trend(player["trend"])
+            }
+
+        }
+
+    )
+
+
+
+
+# -----------------------------------
+# MAIN
+# -----------------------------------
+
+def main():
+
+    print("🔎 Scrapeando jugadores...")
+
+    players = get_players()
+
+    print(f"✅ Jugadores encontrados: {len(players)}")
+
+    try:
+        fixtures = scrape_all_fixtures()
+    except Exception as e:
+        print(f"⚠️ No se pudo obtener el calendario: {e}")
+        fixtures = {}
+
+    primer_partido_ms = None
+    jornadas_data = {}
+    try:
+        jornadas_data = scrape_proximas_jornadas(fixtures, cuantas=4)
+        jornada_actual = determine_current_jornada(fixtures)
+        if jornada_actual:
+            primer_partido_ms = jornadas_data.get(str(jornada_actual))
+    except Exception as e:
+        print(f"⚠️ No se pudo calcular el calendario de próximas jornadas: {e}")
+
+    try:
+        save_market_snapshot(players)
+    except Exception as e:
+        print(f"⚠️ No se pudo subir el snapshot a fantasy-data: {e}")
+
+    try:
+        update_history(players)
+    except Exception as e:
+        print(f"⚠️ No se pudo actualizar history.json: {e}")
+
+    try:
+        save_fixtures(fixtures, primer_partido_ms, jornadas_data)
+    except Exception as e:
+        print(f"⚠️ No se pudo subir el calendario a fantasy-data: {e}")
+
+    # Sincronización con Notion — DESACTIVADA. Desde que se migraron los IDs
+    # de jugador a analiticafantasy, ya no reconoce a los ~600 jugadores
+    # existentes y los intenta CREAR de cero uno a uno en vez de actualizar,
+    # lo que dispara la duración del script de 40-60s a varias horas. Como
+    # no se usa esta parte, se quita de la ejecución automática.
+    # try:
+    #     print("🏟️ Leyendo equipos...")
+    #     teams = get_teams()
+    #     print(f"🏟️ Equipos encontrados: {len(teams)}")
+    #
+    #     existing = get_existing_players()
+    #     print(f"📚 Jugadores existentes: {len(existing)}")
+    #
+    #     created = 0
+    #     updated = 0
+    #
+    #     for player in players:
+    #         if player["id"] in existing:
+    #             update_player(existing[player["id"]], player, teams)
+    #             updated += 1
+    #         else:
+    #             create_player(player, teams)
+    #             created += 1
+    #
+    #     print(f"🆕 Creados: {created}")
+    #     print(f"🔄 Actualizados: {updated}")
+    # except Exception as e:
+    #     print(f"⚠️ Sincronización con Notion fallida (no crítico, se ignora): {e}")
+
+
+if __name__ == "__main__":
+    import signal
+
+    def _tiempo_agotado(signum, frame):
+        raise TimeoutError("El script ha superado el tope de 3 minutos — algo se ha quedado colgado. Se aborta para no bloquear el workflow.")
+
+    try:
+        signal.signal(signal.SIGALRM, _tiempo_agotado)
+        signal.alarm(180)  # tope absoluto de 3 minutos para todo el script
+    except Exception:
+        pass  # signal no está disponible en algunos sistemas (ej. Windows); se ignora sin más
+
+    try:
+        main()
+    except TimeoutError as e:
+        print(f"⏱️ {e}")
+    finally:
+        try:
+            signal.alarm(0)
+        except Exception:
+            pass
