@@ -869,13 +869,49 @@ function sortPlayers(list, ratio){
 }
 
 let fixturesByTeam = {};
+let jornadasLock = {}; // {numJornada: timestampBloqueo (24h antes del 1er partido)}
 
 async function loadFixtures(){
   try{
     fixturesByTeam = await fetchJsonWithFallback(`${DATA_REPO_BASE}/fixtures.json`);
+    const jornadasRaw = fixturesByTeam._jornadas || {};
+    jornadasLock = {};
+    Object.keys(jornadasRaw).forEach(j => {
+      jornadasLock[j] = Number(jornadasRaw[j]) - 24*3600000;
+    });
   }catch(e){
     fixturesByTeam = {};
+    jornadasLock = {};
   }
+}
+
+function jornadaStatusFor(e){
+  const numerosJornada = Object.keys(jornadasLock).map(Number).sort((a,b) => a-b);
+  if(numerosJornada.length === 0) return null; // sin datos todavía
+
+  const liberaEnMs = new Date(e.fecha).getTime() + (e.proteccionMs || PROTECCION_NORMAL_MS);
+
+  // Buscamos la primera jornada (de las que tenemos datos) cuyo bloqueo ya
+  // haya pasado la liberación del jugador — a partir de ahí queda libre/robable.
+  const primeraVulnerable = numerosJornada.find(j => liberaEnMs <= jornadasLock[j]);
+
+  if(primeraVulnerable == null){
+    // Sigue protegido más allá de todas las jornadas que conocemos
+    const ultima = numerosJornada[numerosJornada.length - 1];
+    return {
+      seguro: true,
+      text: `🔒 Seguro hasta J${ultima}+`,
+      cls: "diff-pos",
+      title: `Sigue protegido incluso en el bloqueo de la jornada ${ultima} (la última que tenemos calculada)`
+    };
+  }
+
+  return {
+    seguro: false,
+    text: `⚠️ Libre desde J${primeraVulnerable}`,
+    cls: "diff-neg",
+    title: `Se libera antes del bloqueo de plantillas de la jornada ${primeraVulnerable}: robable a partir de esa jornada (incluida)`
+  };
 }
 
 function nextFixtureFor(teamAbbr){
@@ -1073,6 +1109,7 @@ function mktColumnValue(e, player, key){
     case "reco": { const s = clausulazoScore(e, player); return s == null ? -Infinity : s; }
     case "star": return isStarred(e.playerId) ? 1 : 0;
     case "libera": return mktMsRestantes(e);
+    case "jornada": { const j = jornadaStatusFor(e); return j ? (j.seguro ? 1 : 0) : -1; }
     case "fichado": return new Date(e.fecha).getTime();
     default: return 0;
   }
@@ -1126,7 +1163,7 @@ function renderMercadoView(){
   }
   const mktCols = [
     ["star",""], ["name","Jugador"], ["team","Equipo"], ["pos","Posición"], ["manager","Manager"], ["value","Valor actual"],
-    ["trend","Tendencia"], ["sparkline","Últimos días"], ["clausula","Cláusula pagada"], ["diff","Diferencia"], ["reco","Rentabilidad"], ["libera","Libera en"]
+    ["trend","Tendencia"], ["sparkline","Últimos días"], ["clausula","Cláusula pagada"], ["diff","Diferencia"], ["reco","Rentabilidad"], ["libera","Libera en"], ["jornada","Jornada"]
   ];
   let html = "<table><thead><tr>" + mktCols.map(([key,label]) =>
     `<th data-sort-key="${key}" data-table="mkt">${label}${sortArrow(key, mktSortKey, mktSortDir)}</th>`
@@ -1150,6 +1187,7 @@ function renderMercadoView(){
     const reco = clausulazoLabel(clausulazoScore(e, player));
     const playerName = player ? player.nickname : e.nombre;
     const enLimbo = msRestantes <= 0 && !e.confirmado;
+    const jStatus = jornadaStatusFor(e);
 
     html += `<tr class="${rowClass}">
       <td><button class="star-btn${starred ? ' starred' : ''}" data-star-id="${e.playerId}" title="Marcar interés">${starred ? "★" : "☆"}</button></td>
@@ -1164,6 +1202,7 @@ function renderMercadoView(){
       <td class="${diffClass}">${diffLabel}</td>
       <td class="${reco.cls}" title="Compara la cláusula con el valor proyectado a 14 días si se mantiene la tendencia diaria actual">${reco.text}</td>
       <td>${liberaLabel}${(msRestantes <= 0 && e.confirmado) ? "" : `<br><span class="ppts" style="font-size:11px;">fichado ${fechaLabelFor(e.fecha)}</span>`}</td>
+      <td class="${jStatus ? jStatus.cls : ''}" title="${jStatus ? jStatus.title : ''}">${jStatus ? jStatus.text : "—"}</td>
       <td>
         ${enLimbo ? `<button class="rm-btn" data-confirm-key="${e.key}" title="Confirmar: se queda tal cual">✔️</button>` : ""}
         <button class="rm-btn" data-edit-key="${e.key}" title="Subir cláusula / transferir">✏️</button>
@@ -1195,6 +1234,7 @@ function renderMercadoView(){
         <div style="grid-column:1 / -1;"><span class="pc-label">Últimos días</span><br>${player ? sparklineSVG(player.id) : "—"}</div>
       </div>
       ${(msRestantes <= 0 && e.confirmado) ? "" : `<div class="pc-label" style="margin-top:6px;">fichado ${fechaLabelFor(e.fecha)}</div>`}
+      ${jStatus ? `<div style="margin-top:4px;" class="${jStatus.cls}" title="${jStatus.title}">${jStatus.text}</div>` : ""}
     </div>`;
   });
   html += "</tbody></table>";
