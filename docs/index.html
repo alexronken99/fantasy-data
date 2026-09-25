@@ -870,6 +870,8 @@ function sortPlayers(list, ratio){
 
 let fixturesByTeam = {};
 let jornadasLock = {}; // {numJornada: timestampBloqueo (24h antes del 1er partido)}
+const JORNADA_COLORS = ["#D9574A", "#E3A83B", "#3B82F6", "#8B5CF6", "#22C55E", "#F97316", "#EC4899", "#14B8A6"];
+function colorForJornada(j){ return JORNADA_COLORS[j % JORNADA_COLORS.length]; }
 
 async function loadFixtures(){
   try{
@@ -905,7 +907,7 @@ function jornadaStatusFor(e){
     return {
       seguro: true,
       text: `🔒 Seguro hasta J${ultima}+`,
-      cls: "diff-pos",
+      color: colorForJornada(ultima),
       title: `Sigue protegido incluso en el bloqueo de la jornada ${ultima} (la última que tenemos calculada)`
     };
   }
@@ -913,7 +915,7 @@ function jornadaStatusFor(e){
   return {
     seguro: false,
     text: `⚠️ Libre desde J${primeraVulnerable}`,
-    cls: "diff-neg",
+    color: colorForJornada(primeraVulnerable),
     title: `Se libera antes del bloqueo de plantillas de la jornada ${primeraVulnerable}: robable a partir de esa jornada (incluida)`
   };
 }
@@ -1206,7 +1208,7 @@ function renderMercadoView(){
       <td class="${diffClass}">${diffLabel}</td>
       <td class="${reco.cls}" title="Compara la cláusula con el valor proyectado a 14 días si se mantiene la tendencia diaria actual">${reco.text}</td>
       <td>${liberaLabel}${(msRestantes <= 0 && e.confirmado) ? "" : `<br><span class="ppts" style="font-size:11px;">fichado ${fechaLabelFor(e.fecha)}</span>`}</td>
-      <td class="${jStatus ? jStatus.cls : ''}" title="${jStatus ? jStatus.title : ''}">${jStatus ? jStatus.text : "—"}</td>
+      <td style="${jStatus ? `color:${jStatus.color}; font-weight:600;` : ''}" title="${jStatus ? jStatus.title : ''}">${jStatus ? jStatus.text : "—"}</td>
       <td>
         ${enLimbo ? `<button class="rm-btn" data-confirm-key="${e.key}" title="Confirmar: se queda tal cual">✔️</button>` : ""}
         <button class="rm-btn" data-edit-key="${e.key}" title="Subir cláusula / transferir">✏️</button>
@@ -1238,7 +1240,7 @@ function renderMercadoView(){
         <div style="grid-column:1 / -1;"><span class="pc-label">Últimos días</span><br>${player ? sparklineSVG(player.id) : "—"}</div>
       </div>
       ${(msRestantes <= 0 && e.confirmado) ? "" : `<div class="pc-label" style="margin-top:6px;">fichado ${fechaLabelFor(e.fecha)}</div>`}
-      ${jStatus ? `<div style="margin-top:4px;" class="${jStatus.cls}" title="${jStatus.title}">${jStatus.text}</div>` : ""}
+      ${jStatus ? `<div style="margin-top:4px; color:${jStatus.color}; font-weight:600;" title="${jStatus.title}">${jStatus.text}</div>` : ""}
     </div>`;
   });
   html += "</tbody></table>";
