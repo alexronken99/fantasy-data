@@ -886,6 +886,10 @@ async function loadFixtures(){
 }
 
 function jornadaStatusFor(e){
+  // Si ya está libre ahora mismo, esta columna no aporta nada nuevo —
+  // esa información ya la da "Libera en" / "Por confirmar".
+  if(mktMsRestantes(e) <= 0) return null;
+
   const numerosJornada = Object.keys(jornadasLock).map(Number).sort((a,b) => a-b);
   if(numerosJornada.length === 0) return null; // sin datos todavía
 
