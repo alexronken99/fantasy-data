@@ -894,7 +894,7 @@ function jornadaStatusFor(e){
 
   // Solo cuentan los bloqueos que aún no han pasado
   const numerosJornada = Object.keys(jornadasLock).map(Number).filter(j => jornadasLock[j] > Date.now()).sort((a,b) => a-b);
-  if(numerosJornada.length === 0) return null; // sin datos todavía
+  if(numerosJornada.length === 0) return {seguro:true, text:'🔒 Sin horario de jornada', color:'#8a8a8a', title:'Todavía no hay horarios de las próximas jornadas'};
 
   const liberaEnMs = new Date(e.fecha).getTime() + (e.proteccionMs || PROTECCION_NORMAL_MS);
 
