@@ -445,8 +445,8 @@ const MANAGER_COLORS = {
   "DLuqueG": {bg:"#FFFFFF", fg:"#1a1a1a"},
   "aramos07": {bg:"#3B82F6", fg:"#ffffff"},
   "FDiaz CF": {bg:"#22C55E", fg:"#1a1a1a"},
-  "Bordalás y Cuchillo": {bg:"#8B5E34", fg:"#ffffff"},
-  "Adri Amoros 8896": {bg:"#8B5CF6", fg:"#ffffff"},
+  "Bordalás esmi pastor": {bg:"#8B5E34", fg:"#ffffff"},
+  "Real Amoros CF8": {bg:"#8B5CF6", fg:"#ffffff"},
   "Crodrical C.F": {bg:"#F97316", fg:"#ffffff"}
 };
 
@@ -454,6 +454,9 @@ const TEAM_CREST_ID = {"BAR":529,"RMA":541,"VIL":533,"ATM":530,"BET":543,"CEL":5
 const TEAM_NAME_TO_CREST_ID = {"Barcelona":529,"Real Madrid":541,"Villarreal":533,"Atlético":530,"Atletico Madrid":530,"Real Betis":543,"Betis":543,"Celta":538,"Getafe":546,"Rayo":728,"Rayo Vallecano":728,"Valencia":532,"Real Sociedad":548,"Espanyol":540,"Athletic":531,"Athletic Club":531,"Sevilla":536,"Alavés":542,"Elche":797,"Levante":539,"Osasuna":727,"Racing":4665,"Racing Santander":4665,"Deportivo":544,"Deportivo La Coruna":544,"Málaga":535,"Malaga":535};
 
 const MANAGER_LIST = Object.keys(MANAGER_COLORS);
+// Nombres antiguos de managers que han cambiado de nombre en la liga
+const MANAGER_ALIASES = {"Bordalás y Cuchillo":"Bordalás esmi pastor","Adri Amoros 8896":"Real Amoros CF8"};
+function canonManager(n){ return MANAGER_ALIASES[n] || n; }
 
 function buildManagerChips(containerId, hiddenInputId, currentValue){
   const container = document.getElementById(containerId);
@@ -671,7 +674,7 @@ async function loadStorage(){
       key: e.key,
       playerId: e.playerId,
       nombre: e.jugador,
-      rival: e.manager,
+      rival: canonManager(e.manager),
       fecha: Number(e.fecha),
       clausula: e.clausula != null && e.clausula !== "" ? Number(e.clausula) : null,
       valorAlFichar: e.valorAlFichar != null && e.valorAlFichar !== "" ? Number(e.valorAlFichar) : null,
@@ -1767,12 +1770,36 @@ document.getElementById("filtroPendientesBtn").addEventListener("click", () => {
   renderMercadoView();
 });
 
+
+// Jugadores fichados que aún no estaban en analiticafantasy: cuando aparecen en latest.json,
+// se vinculan solos (id, club y valor) y se guardan también en la hoja.
+function fuzzyNameKey(s){ return normalizeName(s).replace(/[il1]/g, "i"); }
+async function linkPendingEntries(){
+  if(!players.length) return;
+  const ids = new Set(players.map(p => String(p.id)));
+  const byExact = {}, byFuzzy = {};
+  players.forEach(p => { byExact[normalizeName(p.nickname)] = p; byFuzzy[fuzzyNameKey(p.nickname)] = p; });
+  let cambios = 0;
+  for(const e of radarEntries){
+    if(e.playerId && ids.has(String(e.playerId))) continue;
+    const p = byExact[normalizeName(e.nombre)] || byFuzzy[fuzzyNameKey(e.nombre)];
+    if(!p) continue;
+    e.playerId = p.id;
+    e.nombre = p.nickname;
+    if(e.valorAlFichar == null && p.marketValue) e.valorAlFichar = p.marketValue;
+    cambios++;
+    syncSeguimiento("update", e);
+  }
+  if(cambios) await saveRadar();
+}
+
 async function init(){
   await loadStorage();
   await loadStarred();
   checkClauseAlerts();
   try{
     await fetchPlayers();
+    await linkPendingEntries();
     await loadPrevSnapshot();
     await loadFixtures();
     await loadHistory();
