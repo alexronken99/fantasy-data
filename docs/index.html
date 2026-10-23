@@ -1397,7 +1397,11 @@ function playerOnceScore(p){
   const dificultad = nf && nf.dificultad ? nf.dificultad : 3;
   const base = (tendenciaDiaria / 1000000) - (dificultad - 3) * 0.5;
   const prob = p.startProb != null ? p.startProb : 60; // sin dato, asumimos duda moderada
-  return base * (prob / 100);
+  // La probabilidad de jugar manda: antes se multiplicaba directamente por "base", y cuando
+  // base era negativo un suplente (10%) salía mejor que un titular (90%). Ahora se suma un
+  // margen para que el resultado sea siempre positivo, y tendencia/rival solo ajustan.
+  const baseAjustada = 5 + Math.max(-3, Math.min(3, base));
+  return (prob / 100) * baseAjustada;
 }
 
 function computeRecommendedOnce(){
