@@ -582,11 +582,22 @@ function fechaLabelFor(fecha){
 const PROTECCION_NORMAL_MS = 14 * 24 * 60 * 60 * 1000;
 const PROTECCION_BLINDAJE_MS = 48 * 60 * 60 * 1000;
 
-function mktMsRestantes(e){
+// La protección se cuenta en días naturales (misma hora del día), no en bloques de 24h exactas:
+// así los cambios de hora (verano/invierno) no desplazan la liberación una hora.
+function liberaEnMsFor(e){
   const compra = new Date(e.fecha);
-  const duracion = e.proteccionMs || PROTECCION_NORMAL_MS;
-  const liberaEn = new Date(compra.getTime() + duracion);
-  return liberaEn - new Date();
+  const dur = e.proteccionMs || PROTECCION_NORMAL_MS;
+  const DIA = 24 * 60 * 60 * 1000;
+  if(dur % DIA === 0){
+    const d = new Date(compra.getTime());
+    d.setDate(d.getDate() + dur / DIA);
+    return d.getTime();
+  }
+  return compra.getTime() + dur;
+}
+
+function mktMsRestantes(e){
+  return liberaEnMsFor(e) - Date.now();
 }
 
 function liberaLabelFor(e){
@@ -854,7 +865,7 @@ function jugColumnValue(p, key, ratio){
     case "trend": return trendFor(p).diff;
     case "points": return p.points || 0;
     case "avg": return p.averagePoints || 0;
-    case "sugerida": return ratio ? p.marketValue * ratio.avg : 0;
+    case "sugerida": return ratio ? suggestedBidFor(p, ratio) : 0;
     case "titular": return p.startProb != null ? p.startProb : -1;
     case "rival": { const nf = nextFixtureFor(p.teamAbbr); return nf ? (nf.dificultad||0) : -1; }
     default: return 0;
@@ -899,7 +910,7 @@ function jornadaStatusFor(e){
   const numerosJornada = Object.keys(jornadasLock).map(Number).filter(j => jornadasLock[j] > Date.now()).sort((a,b) => a-b);
   if(numerosJornada.length === 0) return {seguro:true, text:'🔒 Sin horario de jornada', color:'#8a8a8a', title:'Todavía no hay horarios de las próximas jornadas'};
 
-  const liberaEnMs = new Date(e.fecha).getTime() + (e.proteccionMs || PROTECCION_NORMAL_MS);
+  const liberaEnMs = liberaEnMsFor(e);
 
   // Buscamos la primera jornada (de las que tenemos datos) cuyo bloqueo ya
   // haya pasado la liberación del jugador — a partir de ahí queda libre/robable.
@@ -942,12 +953,29 @@ function startProbLabel(prob){
   return `<span class="${cls}">${prob}%</span>`;
 }
 
+// Sobreprecio típico que se paga en tu liga sobre el valor de mercado (mediana, para que
+// un fichaje extremo no distorsione), limitado entre 0% y 50%.
 function learnedBidRatio(){
   const withData = radarEntries.filter(e => e.clausula && e.valorAlFichar);
   if(withData.length === 0) return null;
-  const ratios = withData.map(e => e.clausula / e.valorAlFichar);
-  const avg = ratios.reduce((a,b)=>a+b, 0) / ratios.length;
-  return {avg, count: withData.length};
+  const prem = withData.map(e => e.clausula / e.valorAlFichar - 1).sort((a,b) => a - b);
+  const mid = Math.floor(prem.length / 2);
+  const median = prem.length % 2 ? prem[mid] : (prem[mid-1] + prem[mid]) / 2;
+  const premium = Math.max(0, Math.min(0.5, median));
+  return {avg: 1 + premium, premium, count: withData.length};
+}
+
+// Puja sugerida = valor + sobreprecio típico ajustado por la tendencia del jugador:
+//  - sube fuerte (~+2.7%/día o más): se paga el sobreprecio típico o algo más
+//  - estable: la mitad del sobreprecio
+//  - baja (más de -0.5%/día): sin sobreprecio, se puja el valor de mercado
+function suggestedBidFor(p, ratio){
+  if(!ratio || !p.marketValue) return null;
+  const tendenciaPct = weeklyTrend(p) / p.marketValue; // variación diaria en %
+  let factor = 0.5 + tendenciaPct / 0.055;
+  if(tendenciaPct < -0.005) factor = 0;
+  factor = Math.max(0, Math.min(1.4, factor));
+  return p.marketValue * (1 + ratio.premium * factor);
 }
 
 function renderTable(){
@@ -972,7 +1000,7 @@ function renderTable(){
     const t = trendFor(p);
     const arrow = t.dir === "up" ? "▲" : t.dir === "down" ? "▼" : "＝";
     const statusFlag = STATUS_LABEL[p.playerStatus] ? `<span class="status-flag status-${p.playerStatus}">${STATUS_LABEL[p.playerStatus]}</span>` : "";
-    const sugerida = ratio ? fmtEuro(Math.round(p.marketValue * ratio.avg)) : "—";
+    const sugerida = ratio ? fmtEuro(Math.round(suggestedBidFor(p, ratio))) : "—";
     const nf = nextFixtureFor(p.teamAbbr);
     let rivalCell = "—";
     if(nf){
