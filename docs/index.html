@@ -580,6 +580,9 @@ function fechaLabelFor(fecha){
 }
 
 const PROTECCION_NORMAL_MS = 14 * 24 * 60 * 60 * 1000;
+// Al liberarse un jugador comprado por menos de 1M, el juego le pone cláusula de 1M (mínimo).
+const CLAUSULA_MINIMA = 1000000;
+function floorClausula(c){ return (c != null && c > 0) ? Math.max(c, CLAUSULA_MINIMA) : c; }
 const PROTECCION_BLINDAJE_MS = 48 * 60 * 60 * 1000;
 
 // La protección se cuenta en días naturales (misma hora del día), no en bloques de 24h exactas:
@@ -687,7 +690,7 @@ async function loadStorage(){
       nombre: e.jugador,
       rival: canonManager(e.manager),
       fecha: Number(e.fecha),
-      clausula: e.clausula != null && e.clausula !== "" ? Number(e.clausula) : null,
+      clausula: e.clausula != null && e.clausula !== "" ? floorClausula(Number(e.clausula)) : null,
       valorAlFichar: e.valorAlFichar != null && e.valorAlFichar !== "" ? Number(e.valorAlFichar) : null,
       confirmado: e.confirmado === true || e.confirmado === "true" || e.confirmado === 1,
       proteccionMs: e.proteccionMs != null && e.proteccionMs !== "" ? Number(e.proteccionMs) : null
@@ -1220,7 +1223,9 @@ function renderMercadoView(){
     const t = player ? trendFor(player) : {diff:0, dir:"flat"};
     const arrow = t.dir === "up" ? "▲" : t.dir === "down" ? "▼" : "＝";
     const diff = (valorActual != null && e.clausula) ? e.clausula - valorActual : null;
-    const diffClass = diff == null ? "" : diff >= 0 ? "diff-pos" : "diff-neg";
+    // Rojo = cláusula por encima del valor (+tanto): está protegido. Verde = cláusula a valor de mercado
+// (o menos, con un margen del 5%): seguramente no la han subido y es fácil de robar.
+    const diffClass = diff == null ? "" : (diff <= (valorActual || 0) * 0.05 ? "diff-pos" : "diff-neg");
     const diffLabel = diff == null ? "—" : (diff >= 0 ? "+" : "") + fmtEuro(diff);
     const reco = clausulazoLabel(clausulazoScore(e, player));
     const playerName = player ? player.nickname : e.nombre;
@@ -1644,7 +1649,7 @@ function openModal(playerId){
   document.getElementById("mpSave").onclick = async () => {
     const rival = document.getElementById("mpRival").value.trim();
     const fecha = document.getElementById("mpDate").value;
-    const clausula = parseEuroInput(document.getElementById("mpClause").value);
+    const clausula = floorClausula(parseEuroInput(document.getElementById("mpClause").value));
     if(!rival || !fecha) return;
     radarEntries.push({
       key: p.id + "_" + Date.now(),
@@ -1725,7 +1730,7 @@ document.getElementById("conflictOverlay").onclick = (e) => { if(e.target.id ===
 document.getElementById("conflictSave").onclick = async () => {
   const entry = radarEntries.find(e => e.key === conflictKey);
   if(!entry) return;
-  entry.clausula = parseEuroInput(document.getElementById("conflictClause").value);
+  entry.clausula = floorClausula(parseEuroInput(document.getElementById("conflictClause").value));
   entry.fecha = document.getElementById("conflictDate").value;
   await syncSeguimiento("update", entry);
   await saveRadar();
@@ -1743,12 +1748,12 @@ document.getElementById("editSave").onclick = async () => {
   if(editMode === "raise"){
     const amount = parseEuroInput(document.getElementById("raiseAmount").value);
     if(!amount) return;
-    entry.clausula = amount;
+    entry.clausula = floorClausula(amount);
     if(mktMsRestantes(entry) <= 0) entry.confirmado = true; // solo si ya estaba liberado; si sigue protegido, no tocar
     await syncSeguimiento("update", entry);
   } else if(editMode === "transfer"){
     const manager = document.getElementById("transferManager").value.trim();
-    const clauseVal = parseEuroInput(document.getElementById("transferClause").value);
+    const clauseVal = floorClausula(parseEuroInput(document.getElementById("transferClause").value));
     const date = document.getElementById("transferDate").value;
     if(!manager || !date) return;
     const player = players.find(p => String(p.id) === String(entry.playerId));
