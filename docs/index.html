@@ -1223,10 +1223,9 @@ function renderMercadoView(){
     const t = player ? trendFor(player) : {diff:0, dir:"flat"};
     const arrow = t.dir === "up" ? "▲" : t.dir === "down" ? "▼" : "＝";
     const diff = (valorActual != null && e.clausula) ? e.clausula - valorActual : null;
-    // Rojo = cláusula por encima del valor (+tanto): está protegido. Verde = cláusula a valor de mercado
-// (o menos, con un margen del 5%): seguramente no la han subido y es fácil de robar.
-    const diffClass = diff == null ? "" : (diff <= (valorActual || 0) * 0.05 ? "diff-pos" : "diff-neg");
-    const diffLabel = diff == null ? "—" : (diff >= 0 ? "+" : "") + fmtEuro(diff);
+    // Rojo = cláusula por encima del valor (+): protegido. Verde = a valor de mercado o por debajo (0 o -): fácil de robar.
+    const diffClass = diff == null ? "" : (diff > 0 ? "diff-neg" : "diff-pos");
+    const diffLabel = diff == null ? "—" : (diff > 0 ? "+" : diff < 0 ? "-" : "") + fmtEuro(Math.abs(diff));
     const reco = clausulazoLabel(clausulazoScore(e, player));
     const playerName = player ? player.nickname : e.nombre;
     const enLimbo = msRestantes <= 0 && !e.confirmado;
